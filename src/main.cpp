@@ -1,15 +1,22 @@
-/*  Author: Jacob Owens - Avid Product Development
+//====================================================
+// title block
+//====================================================
+/*  
+ *  Author: Jacob Owens - Avid Product Development
  *  Customer: Vestas
  *  Date: 08082023
  */
-
-
+//====================================================
+// end title block
+//====================================================
 
 
 //====================================================
 // included libraries
 //====================================================
 #include <Arduino.h>
+//====================================================
+// end included libraries
 //====================================================
 
 
@@ -30,10 +37,14 @@ const char* password = "grover1234"; //Enter Password
 
 using namespace websockets2_generic;
 //====================================================
+// end wifi and websockets definitions
+//====================================================
 
 
 
 
+//====================================================
+// ip address definitions
 //====================================================
 // Define both wifi server and websocket server
 WiFiServer wifiServer(80);
@@ -45,9 +56,10 @@ IPAddress testdns(8,8,8,8);
 IPAddress gateway(192, 168, 0, 254);
 // These are set to the same just for ease of use. 
 IPAddress nmask(255, 255, 255, 0);
-
-WebsocketsServer websocketServer;
 //====================================================
+// end ip address definitions
+//====================================================
+
 
 
 //====================================================
@@ -57,6 +69,10 @@ void setup(void);
 void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
+void WebSocketMachine(void);
+void onMessageCallback(WebsocketsMessage);
+//====================================================
+// end function prototypes
 //====================================================
 
 
@@ -67,7 +83,8 @@ void BlueLedMachine(void);
 #define GREEN_LED   LEDG
 #define BLUE_LED    LEDB
 //====================================================
-
+// end pin definitions
+//====================================================
 
 
 //====================================================
@@ -78,6 +95,11 @@ bool blueLedFlag = false;
 int redLedDelay = 0;
 int blueLedDelay = 0;
 
+bool wsFlag = 0;
+int wsDelay = 0;
+
+//====================================================
+// end global variables
 //====================================================
 
 
@@ -92,14 +114,35 @@ enum LedStates {
 };
 LedStates RedLedState;
 LedStates BlueLedState;
+
+enum wsStates { 
+  WS_DISCONNECTED,
+  WS_CONNECTED
+};
+
+wsStates wsState;
 //====================================================
+// end states
+//====================================================
+
+
+
+
 
 
 //====================================================
 // objects
 //====================================================
+WebsocketsServer wsServer;
+WebsocketsClient wsClient;
+WebsocketsMessage wsMessage;
 
 //====================================================
+// end objects
+//====================================================
+
+
+
 
 
 
@@ -110,7 +153,6 @@ int status = WL_IDLE_STATUS;
 //====================================================
 #include "Portenta_H7_TimerInterrupt.h"
 volatile int interruptCounter;
-
 void TimerHandler() { 
   interruptCounter++;
 
@@ -122,61 +164,72 @@ void TimerHandler() {
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
+    if (wsDelay) wsDelay--;
     interruptCounter = 0;
   }
 
 }
-
 Portenta_H7_Timer ITimer(TIM16);
 //====================================================
+// end timer
+//====================================================
 
+
+
+//====================================================
+// setup
+//====================================================
 void setup() {
-
+  // timer setup
   ITimer.attachInterruptInterval(10, TimerHandler);
-
+  // debug setup
   Serial.begin(115200);
-  while (!Serial && millis() < 5000);
 
-  // check for the WiFi module:
-  if (WiFi.status() == WL_NO_MODULE) {
-    Serial.println("Communication with WiFi module failed!");
-    while (true) {
-      digitalWrite(BLUE_LED, LED_ON);
-      digitalWrite(RED_LED, LED_OFF);
-      delay(200);
-      digitalWrite(BLUE_LED, LED_OFF);
-      digitalWrite(RED_LED, LED_ON);
-    }
-  }
-
+  // wifi setup
+  while (!Serial && millis() < 3000);
   WiFi.config(local, testdns, gateway, nmask);
   delay(250);
   WiFi.beginAP(ssid, password);
   wifiServer.begin();
+  while (WiFi.status() != WL_CONNECTED && millis() < 6000);
 
-  for(int i = 0; i < 5 && WiFi.status() != WL_CONNECTED; i++) {
-      Serial.print(".");
-      delay(1000);
-  }
-
-  Serial.println("");
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());   //You can get IP address assigned to ESP
+  Serial.println(WiFi.localIP());
 
-  websocketServer.listen(8080);
-  Serial.print("Is server live? ");
-  Serial.println(websocketServer.available());
+  // websocket setup
+  wsServer.listen(8080);
 
+  wsClient = wsServer.accept();
 
 }
+//====================================================
+// end setup
+//====================================================
 
+
+
+
+//====================================================
+// main loop
+//====================================================
 void loop() {
 
   BlueLedMachine();
-  RedLedMachine();
+  //RedLedMachine();
+  WebSocketMachine();
 }
+//====================================================
+// end main loop
+//====================================================
 
+
+
+
+
+//====================================================
+// functions
+//====================================================
 void BlueLedMachine() {
   switch(BlueLedState) {
     case LED_OFF:
@@ -226,3 +279,36 @@ void RedLedMachine() {
     break;
   }
 }
+
+
+void WebSocketMachine() {  
+  Serial.println("Websocket machine");
+  if (wsClient.available()) { 
+    Serial.println("if statement");
+    WebsocketsMessage msg = wsClient.readNonBlocking();
+  
+    Serial.print("Got Message: ");
+    Serial.println(msg.data());
+    //wsClient.close();
+  }
+
+  else {
+    Serial.println("else statemetn");
+  wsClient = wsServer.accept();
+
+  }
+
+
+}
+
+void onMessageCallback(WebsocketsMessage message)
+{
+  //Doing something with received String message.data() type
+  
+  Serial.print("Got Message: ");
+  Serial.println(message.data());
+}
+
+//====================================================
+// end functions
+//====================================================
