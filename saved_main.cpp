@@ -15,8 +15,6 @@
 // included libraries
 //====================================================
 #include <Arduino.h>
-#include <Vector.h>
-
 //====================================================
 // end included libraries
 //====================================================
@@ -30,16 +28,12 @@
 #define USE_WIFI_NINA         false
 #define USE_WIFI_CUSTOM       false
 #define WEBSOCKETS_USE_PORTENTA_H7_WIFI           true
-#define DEBUG_WEBSOCKETS_PORT     Serial
-// Debug Level from 0 to 4
-#define _WEBSOCKETS_LOGLEVEL_     3
+
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 
-#define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "192.168.3.1"
-const char* ssid = "grover123456"; //Enter SSID
-const char* password = "grover123456"; //Enter Password
+const char* ssid = "grover1234"; //Enter SSID
+const char* password = "grover1234"; //Enter Password
 
 using namespace websockets2_generic;
 //====================================================
@@ -52,12 +46,14 @@ using namespace websockets2_generic;
 //====================================================
 // ip address definitions
 //====================================================
+// Define both wifi server and websocket server
+WiFiServer wifiServer(80);
 // Since the esp is also on its own network... it has a local ip that isn't used for anything. 
-IPAddress local(192, 168, 3, 1);
+IPAddress local(192, 168, 0, 254);
 // throwing googles dns in for a temp fix
 IPAddress testdns(8,8,8,8); 
 // Since we are serving as an access point this is the address where the websockets will be posted
-IPAddress gateway(192, 168, 3, 1);
+IPAddress gateway(192, 168, 0, 254);
 // These are set to the same just for ease of use. 
 IPAddress nmask(255, 255, 255, 0);
 //====================================================
@@ -74,9 +70,11 @@ void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
 void WebSocketMachine(void);
-void pollAllClients(void);
-void onMessageCallback(WebsocketsMessage);
+void checkToSendMessage(void);
 void sendMessage(void);
+void onMessageCallback(WebsocketsMessage);
+void onEventsCallback(WebsocketsEvent, String);
+
 //====================================================
 // end function prototypes
 //====================================================
@@ -98,18 +96,11 @@ void sendMessage(void);
 //====================================================
 bool redLedFlag = false;
 bool blueLedFlag = false;
-volatile int redLedDelay = 0;
-volatile int blueLedDelay = 0;
+int redLedDelay = 0;
+int blueLedDelay = 0;
 
 bool wsFlag = 0;
-volatile int wsDelay = 0;
-
-
-#define HEARTBEAT_INTERVAL      300000 // 5 Minutes
-
-uint64_t heartbeatTimestamp     = 0;
-uint64_t now                    = 0;
-bool connected = false;
+int wsDelay = 0;
 
 //====================================================
 // end global variables
@@ -132,11 +123,24 @@ enum wsStates {
   WS_DISCONNECTED,
   WS_CONNECTED
 };
-wsStates wsState;
 
+wsStates wsState;
 //====================================================
 // end states
 //====================================================
+
+
+
+
+int status = WL_IDLE_STATUS;
+
+#define HEARTBEAT_INTERVAL      300000 // 5 Minutes
+
+uint64_t heartbeatTimestamp     = 0;
+uint64_t now                    = 0;
+
+bool connected = false;
+
 
 
 
@@ -145,11 +149,9 @@ wsStates wsState;
 //====================================================
 // objects
 //====================================================
+WebsocketsClient wsClient;
 WebsocketsServer wsServer;
 WebsocketsMessage wsMessage;
-WebsocketsClient wsClient;
-
-//Vector<WebsocketsClient> allClients;
 
 //====================================================
 // end objects
@@ -168,12 +170,12 @@ void TimerHandler() {
     // every 1/10 second
   if ((interruptCounter % 10000) == 0) {
         if (redLedDelay) redLedDelay--;
-        if (wsDelay) wsDelay--;
   }
 
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
+    if (wsDelay) wsDelay--;
     interruptCounter = 0;
   }
 
@@ -183,34 +185,14 @@ Portenta_H7_Timer ITimer(TIM16);
 // end timer
 //====================================================
 
-void onEventsCallback(WebsocketsEvent event, String data) 
-{
-  (void) data;
-  
-  if (event == WebsocketsEvent::ConnectionOpened) 
-  {
-    Serial.println("Connnection Opened");
-  } 
-  else if (event == WebsocketsEvent::ConnectionClosed) 
-  {
-    Serial.println("Connnection Closed");
-  } 
-  else if (event == WebsocketsEvent::GotPing) 
-  {
-    Serial.println("Got a Ping!");
-  } 
-  else if (event == WebsocketsEvent::GotPong) 
-  {
-    Serial.println("Got a Pong!");
-  }
-}
+
 
 //====================================================
 // setup
 //====================================================
 void setup() {
   // timer setup
-  ITimer.attachInterruptInterval(10, TimerHandler); // is thje timer messing with timeout of the websockets connection??????????
+  ITimer.attachInterruptInterval(10, TimerHandler);
   // debug setup
   Serial.begin(115200);
 
@@ -219,35 +201,22 @@ void setup() {
   WiFi.config(local, testdns, gateway, nmask);
   delay(500);
   WiFi.beginAP(ssid, password);
-  while (WiFi.status() != WL_CONNECTED && millis() < 10000);
+  wifiServer.begin();
+  while (WiFi.status() != WL_CONNECTED && millis() < 6000);
 
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
   // websocket setup
-  wsServer.listen(WEBSOCKETS_PORT);
-  Serial.println("websocket server listening...");
+  wsServer.listen(8080);
+  Serial.println("listening...");
 
 
+  //////
 
 
-
-
-}
-//====================================================
-// end setup
-//====================================================
-
-void sendMessage()
-{
-  // try to connect to Websockets server
-  if (!connected)
-  {
-    wsClient = wsServer.accept();
-    connected = wsClient.available();
-
-        // run callback when messages are received
+  // run callback when messages are received
   wsClient.onMessage([&](WebsocketsMessage message) 
   {
     Serial.print("Got Message: ");
@@ -257,50 +226,25 @@ void sendMessage()
   // run callback when events are occuring
   wsClient.onEvent(onEventsCallback);
 
+  connected = wsClient.connect("ws://192.168.0.254:8080");
 
-  }
-  
-  if (connected) 
-  {
-    Serial.println("Connected!");
 
-    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    wsClient.send(WS_msg);
-  } 
-  else 
-  {
-    Serial.println("Not Connected!");
-    Serial.println(connected);
-  }
 }
+//====================================================
+// end setup
+//====================================================
 
-void checkToSendMessage()
-{
-  #define REPEAT_INTERVAL    10000L
-  
-  static unsigned long checkstatus_timeout = 1000;
 
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout)
-  {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
-}
 
 
 //====================================================
 // main loop
 //====================================================
-
-
 void loop() {
 
   BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
-
-
 }
 //====================================================
 // end main loop
@@ -321,7 +265,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println("blue led on");
       }
     break;
     case LED_ON:
@@ -330,7 +274,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println("led off");
       }
     break;
     default:
@@ -364,13 +308,8 @@ void RedLedMachine() {
 }
 
 
-
-
-
-void WebSocketMachine() {
-    connected = wsClient.available();
-
-checkToSendMessage();
+void WebSocketMachine() {  
+  checkToSendMessage();
   
   // let the websockets client check for incoming messages
   if (wsClient.available())
@@ -386,31 +325,69 @@ checkToSendMessage();
       wsClient.send("H");
     }
   }
+}
 
+
+void checkToSendMessage()
+{
+  #define REPEAT_INTERVAL    10000L
+  
+  static unsigned long checkstatus_timeout = 1000;
+
+  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
+  if (millis() > checkstatus_timeout)
+  {
+    sendMessage();
+    checkstatus_timeout = millis() + REPEAT_INTERVAL;
+  }
+}
+
+void sendMessage()
+{ 
+  Serial.println(wsServer.available());
+  // try to connect to Websockets server
+  if (!connected)
+  {
+    wsClient = wsServer.accept();
+    connected = wsClient.connect("ws://192.168.0.254:8080");
+  }
+  
+  if (connected) 
+  {
+    Serial.println("Connected!");
+
+    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
+    wsClient.send(WS_msg);
+  } 
+  else 
+  {
+    Serial.println("Not Connected!");
+  }
+}
+
+
+void onEventsCallback(WebsocketsEvent event, String data) 
+{
+  (void) data;
+  
+  if (event == WebsocketsEvent::ConnectionOpened) 
+  {
+    Serial.println("Connnection Opened");
+  } 
+  else if (event == WebsocketsEvent::ConnectionClosed) 
+  {
+    Serial.println("Connnection Closed");
+  } 
+  else if (event == WebsocketsEvent::GotPing) 
+  {
+    Serial.println("Got a Ping!");
+  } 
+  else if (event == WebsocketsEvent::GotPong) 
+  {
+    Serial.println("Got a Pong!");
+  }
 }
 
 //====================================================
 // end functions
 //====================================================
-
-/*  if (millis() > times + delays) {
-    times = millis();
-    Serial.println(millis()/1000.0);
-    wsClient.send("Heart beat")
-    wsClient.poll();
-
-
-
-  }
-  if (wsServer.poll()) {
-    //Serial.println("Accepting a new client");
-    WebsocketsClient wsClient = wsServer.accept();
-    wsClient.onMessage(onMessageCallback);
-    wsClient.send("Brooke is evil");
-    wsClient.poll();
-    //allClients.push_back(wsClient);
-  }
-  if ( wsClient.getCloseReason() != -1 ) {
-    Serial.println(wsClient.getCloseReason());
-    delay(10000);
-  }*/

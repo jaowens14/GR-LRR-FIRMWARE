@@ -37,7 +37,6 @@
 #include <WiFi.h>
 
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "192.168.3.1"
 const char* ssid = "grover123456"; //Enter SSID
 const char* password = "grover123456"; //Enter Password
 
@@ -105,10 +104,6 @@ bool wsFlag = 0;
 volatile int wsDelay = 0;
 
 
-#define HEARTBEAT_INTERVAL      300000 // 5 Minutes
-
-uint64_t heartbeatTimestamp     = 0;
-uint64_t now                    = 0;
 bool connected = false;
 
 //====================================================
@@ -183,27 +178,7 @@ Portenta_H7_Timer ITimer(TIM16);
 // end timer
 //====================================================
 
-void onEventsCallback(WebsocketsEvent event, String data) 
-{
-  (void) data;
-  
-  if (event == WebsocketsEvent::ConnectionOpened) 
-  {
-    Serial.println("Connnection Opened");
-  } 
-  else if (event == WebsocketsEvent::ConnectionClosed) 
-  {
-    Serial.println("Connnection Closed");
-  } 
-  else if (event == WebsocketsEvent::GotPing) 
-  {
-    Serial.println("Got a Ping!");
-  } 
-  else if (event == WebsocketsEvent::GotPong) 
-  {
-    Serial.println("Got a Pong!");
-  }
-}
+
 
 //====================================================
 // setup
@@ -231,62 +206,13 @@ void setup() {
 
 
 
-
-
-
 }
 //====================================================
 // end setup
 //====================================================
 
-void sendMessage()
-{
-  // try to connect to Websockets server
-  if (!connected)
-  {
-    wsClient = wsServer.accept();
-    connected = wsClient.available();
-
-        // run callback when messages are received
-  wsClient.onMessage([&](WebsocketsMessage message) 
-  {
-    Serial.print("Got Message: ");
-    Serial.println(message.data());
-  });
-
-  // run callback when events are occuring
-  wsClient.onEvent(onEventsCallback);
 
 
-  }
-  
-  if (connected) 
-  {
-    Serial.println("Connected!");
-
-    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    wsClient.send(WS_msg);
-  } 
-  else 
-  {
-    Serial.println("Not Connected!");
-    Serial.println(connected);
-  }
-}
-
-void checkToSendMessage()
-{
-  #define REPEAT_INTERVAL    10000L
-  
-  static unsigned long checkstatus_timeout = 1000;
-
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout)
-  {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
-}
 
 
 //====================================================
@@ -296,7 +222,7 @@ void checkToSendMessage()
 
 void loop() {
 
-  BlueLedMachine();
+  // BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
 
@@ -321,7 +247,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println("blue led on");
       }
     break;
     case LED_ON:
@@ -330,7 +256,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println("led off");
       }
     break;
     default:
@@ -368,25 +294,25 @@ void RedLedMachine() {
 
 
 void WebSocketMachine() {
-    connected = wsClient.available();
 
-checkToSendMessage();
-  
-  // let the websockets client check for incoming messages
-  if (wsClient.available())
+  //server.handleClient();
+
+  WebsocketsClient client = wsServer.accept();
+
+  if (client.available())
   {
-    wsClient.poll();
+    WebsocketsMessage msg = client.readNonBlocking();
 
-    now = millis();
+    // log
+    Serial.print("Got Message: ");
+    Serial.println(msg.data());
 
-    // Send heartbeat in order to avoid disconnections during ISP resetting IPs over night. Thanks @MacSass
-    if ((now - heartbeatTimestamp) > HEARTBEAT_INTERVAL)
-    {
-      heartbeatTimestamp = now;
-      wsClient.send("H");
-    }
+    // return echo
+    client.send("Echo: " + msg.data());
+
+    // close the connection
+    client.close();
   }
-
 }
 
 //====================================================
