@@ -15,7 +15,6 @@
 // included libraries
 //====================================================
 #include <Arduino.h>
-#include <Vector.h>
 
 //====================================================
 // end included libraries
@@ -38,8 +37,8 @@
 
 #define WEBSOCKETS_PORT     8080
 #define WEBSOCKETS_HOST     "192.168.3.1"
-const char* ssid = "grover123456"; //Enter SSID
-const char* password = "grover123456"; //Enter Password
+const char* ssid = "GR-LRR_POC"; //Enter SSID
+const char* password = "GR-LRR_POC"; //Enter Password
 
 using namespace websockets2_generic;
 //====================================================
@@ -73,10 +72,13 @@ void setup(void);
 void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
+void StepperMachine(void);
 void WebSocketMachine(void);
-void pollAllClients(void);
 void onMessageCallback(WebsocketsMessage);
+void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
+void checkToSendMessage(void);
+
 //====================================================
 // end function prototypes
 //====================================================
@@ -134,11 +136,16 @@ enum wsStates {
 };
 wsStates wsState;
 
+enum StepperStates { 
+  STEPPER_FORWARD,
+  STEPPER_BACKWARD,
+  STEPPER_STOPPED
+};
+StepperStates stepperState;
+
 //====================================================
 // end states
 //====================================================
-
-
 
 
 
@@ -183,27 +190,7 @@ Portenta_H7_Timer ITimer(TIM16);
 // end timer
 //====================================================
 
-void onEventsCallback(WebsocketsEvent event, String data) 
-{
-  (void) data;
-  
-  if (event == WebsocketsEvent::ConnectionOpened) 
-  {
-    Serial.println("Connnection Opened");
-  } 
-  else if (event == WebsocketsEvent::ConnectionClosed) 
-  {
-    Serial.println("Connnection Closed");
-  } 
-  else if (event == WebsocketsEvent::GotPing) 
-  {
-    Serial.println("Got a Ping!");
-  } 
-  else if (event == WebsocketsEvent::GotPong) 
-  {
-    Serial.println("Got a Pong!");
-  }
-}
+
 
 //====================================================
 // setup
@@ -229,64 +216,12 @@ void setup() {
   wsServer.listen(WEBSOCKETS_PORT);
   Serial.println("websocket server listening...");
 
-
-
-
-
-
 }
 //====================================================
 // end setup
 //====================================================
 
-void sendMessage()
-{
-  // try to connect to Websockets server
-  if (!connected)
-  {
-    wsClient = wsServer.accept();
-    connected = wsClient.available();
 
-        // run callback when messages are received
-  wsClient.onMessage([&](WebsocketsMessage message) 
-  {
-    Serial.print("Got Message: ");
-    Serial.println(message.data());
-  });
-
-  // run callback when events are occuring
-  wsClient.onEvent(onEventsCallback);
-
-
-  }
-  
-  if (connected) 
-  {
-    Serial.println("Connected!");
-
-    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    wsClient.send(WS_msg);
-  } 
-  else 
-  {
-    Serial.println("Not Connected!");
-    Serial.println(connected);
-  }
-}
-
-void checkToSendMessage()
-{
-  #define REPEAT_INTERVAL    10000L
-  
-  static unsigned long checkstatus_timeout = 1000;
-
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout)
-  {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
-}
 
 
 //====================================================
@@ -313,6 +248,10 @@ void loop() {
 //====================================================
 // functions
 //====================================================
+
+//====================================================
+// blue led machine
+//====================================================
 void BlueLedMachine() {
   switch(BlueLedState) {
     case LED_OFF:
@@ -337,7 +276,14 @@ void BlueLedMachine() {
     break;
   }
 }
+//====================================================
+// end blue led machine
+//====================================================
 
+
+//====================================================
+// red led machine
+//====================================================
 void RedLedMachine() {
   switch(RedLedState) {
     case LED_OFF:
@@ -362,26 +308,27 @@ void RedLedMachine() {
     break;
   }
 }
+//====================================================
+// end red led machine
+//====================================================
 
-
-
-
+//====================================================
+// websocket machine
+//====================================================
 
 void WebSocketMachine() {
-    connected = wsClient.available();
 
-checkToSendMessage();
+  connected = wsClient.available();
+  checkToSendMessage();
   
   // let the websockets client check for incoming messages
-  if (wsClient.available())
-  {
-    wsClient.poll();
+  if (wsClient.available()) {
 
+    wsClient.poll();
     now = millis();
 
     // Send heartbeat in order to avoid disconnections during ISP resetting IPs over night. Thanks @MacSass
-    if ((now - heartbeatTimestamp) > HEARTBEAT_INTERVAL)
-    {
+    if ((now - heartbeatTimestamp) > HEARTBEAT_INTERVAL) {
       heartbeatTimestamp = now;
       wsClient.send("H");
     }
@@ -389,28 +336,69 @@ checkToSendMessage();
 
 }
 
+
+
+void onMessageCallback(WebsocketsMessage message) {
+    Serial.print("Got Message: ");
+    Serial.println(message.data());
+  }
+
+void onEventsCallback(WebsocketsEvent event, String data) {
+  (void) data;
+  
+  if (event == WebsocketsEvent::ConnectionOpened) {
+    Serial.println("Connnection Opened");
+  } 
+
+  else if (event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println("Connnection Closed");
+  }
+
+  else if (event == WebsocketsEvent::GotPing) {
+    Serial.println("Got a Ping!");
+  }
+
+  else if (event == WebsocketsEvent::GotPong) {
+    Serial.println("Got a Pong!");
+  }
+}
+
+void sendMessage() {
+  // try to connect to Websockets server
+  if (!connected) {
+    wsClient = wsServer.accept();
+    connected = wsClient.available();
+    // run callback when messages are received
+    wsClient.onMessage(onMessageCallback);
+    // run callback when events are occuring
+    wsClient.onEvent(onEventsCallback);
+  }
+  
+  if (connected) {
+    Serial.println("Connected!");
+    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
+    wsClient.send(WS_msg);
+  } 
+
+  else {
+    Serial.println("Not Connected!");
+    Serial.println(connected);
+  }
+}
+
+void checkToSendMessage() {
+  #define REPEAT_INTERVAL    1000L
+  static unsigned long checkstatus_timeout = 1000;
+  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
+  if (millis() > checkstatus_timeout) {
+    sendMessage();
+    checkstatus_timeout = millis() + REPEAT_INTERVAL;
+  }
+}
+//====================================================
+// websocket machine
+//====================================================
+
 //====================================================
 // end functions
 //====================================================
-
-/*  if (millis() > times + delays) {
-    times = millis();
-    Serial.println(millis()/1000.0);
-    wsClient.send("Heart beat")
-    wsClient.poll();
-
-
-
-  }
-  if (wsServer.poll()) {
-    //Serial.println("Accepting a new client");
-    WebsocketsClient wsClient = wsServer.accept();
-    wsClient.onMessage(onMessageCallback);
-    wsClient.send("Brooke is evil");
-    wsClient.poll();
-    //allClients.push_back(wsClient);
-  }
-  if ( wsClient.getCloseReason() != -1 ) {
-    Serial.println(wsClient.getCloseReason());
-    delay(10000);
-  }*/
