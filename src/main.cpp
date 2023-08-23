@@ -40,14 +40,51 @@
 const char* ssid = "GR-LRR_POC"; //Enter SSID
 const char* password = "GR-LRR_POC"; //Enter Password
 
+
 using namespace websockets2_generic;
+
+#define HEARTBEAT_INTERVAL      300000 // 5 Minutes
+
+uint64_t heartbeatTimestamp     = 0;
+uint64_t now                    = 0;
+bool connected = false;
+bool wsFlag = 0;
+volatile int wsDelay = 0;
+String jsonMessage = "";
 //====================================================
 // end wifi and websockets definitions
 //====================================================
 
+//====================================================
+// stepper definitions
+//====================================================
+#include <AccelStepper.h>
+#define STEPPER_STEP_PIN 4
+#define STEPPER_DIRECTION_PIN 5
+AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
+int stepper1Position = 0;
+long stepperSpeed = 0;
+//====================================================
+// end stepper definitions
+//====================================================
+//
+//
+//
+//====================================================
+// json definitions
+//====================================================
+#include <ArduinoJson.h>
+StaticJsonDocument<256> jsonPacket;
 
 
 
+//====================================================
+// end json definitions
+//====================================================
+//
+//
+//
+//
 //====================================================
 // ip address definitions
 //====================================================
@@ -62,9 +99,10 @@ IPAddress nmask(255, 255, 255, 0);
 //====================================================
 // end ip address definitions
 //====================================================
-
-
-
+//
+//
+//
+//
 //====================================================
 // function prototypes
 //====================================================
@@ -78,48 +116,31 @@ void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
 void checkToSendMessage(void);
+void JsonMachine(void);
 
 //====================================================
 // end function prototypes
 //====================================================
-
-
+//
+//
+//
 //====================================================
-// pin definitions
+// led definitions
 //====================================================
 #define RED_LED     LEDR
 #define GREEN_LED   LEDG
 #define BLUE_LED    LEDB
-//====================================================
-// end pin definitions
-//====================================================
-
-
-//====================================================
-// global variables
-//====================================================
 bool redLedFlag = false;
 bool blueLedFlag = false;
 volatile int redLedDelay = 0;
 volatile int blueLedDelay = 0;
-
-bool wsFlag = 0;
-volatile int wsDelay = 0;
-
-
-#define HEARTBEAT_INTERVAL      300000 // 5 Minutes
-
-uint64_t heartbeatTimestamp     = 0;
-uint64_t now                    = 0;
-bool connected = false;
-
 //====================================================
-// end global variables
+// end led definitions
 //====================================================
-
-
-
-
+//
+//
+//
+//
 //====================================================
 // states
 //====================================================
@@ -142,6 +163,7 @@ enum StepperStates {
   STEPPER_STOPPED
 };
 StepperStates stepperState;
+
 
 //====================================================
 // end states
@@ -207,14 +229,23 @@ void setup() {
   delay(500);
   WiFi.beginAP(ssid, password);
   while (WiFi.status() != WL_CONNECTED && millis() < 10000);
-
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+  // end wifi setup
+
 
   // websocket setup
   wsServer.listen(WEBSOCKETS_PORT);
   Serial.println("websocket server listening...");
+  // end websocket setup
+
+
+  // stepper setup
+  stepper1.setMaxSpeed(20000.0);
+  stepper1.setAcceleration(20000.0);
+
+  // end stepper setup
 
 }
 //====================================================
@@ -234,7 +265,7 @@ void loop() {
   BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
-
+  StepperMachine();
 
 }
 //====================================================
@@ -312,6 +343,33 @@ void RedLedMachine() {
 // end red led machine
 //====================================================
 
+
+
+//====================================================
+// stepper machine
+//====================================================
+void StepperMachine(void) {
+  switch(stepperState) {
+    case STEPPER_STOPPED:
+      stepper1.stop();
+    break;
+    case STEPPER_FORWARD:
+      stepper1.move(1);
+    break;
+    case STEPPER_BACKWARD:
+      stepper1.move(-1);
+    break;
+    default:
+    break;
+  }
+  
+  stepper1.run();
+
+}
+//====================================================
+// end stepper machine
+//====================================================
+
 //====================================================
 // websocket machine
 //====================================================
@@ -341,6 +399,8 @@ void WebSocketMachine() {
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Got Message: ");
     Serial.println(message.data());
+    // save string message to global variable 
+    jsonMessage = message.data();
   }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
@@ -378,9 +438,11 @@ void sendMessage() {
     Serial.println("Connected!");
     String WS_msg = String("Hello to Server from ") + BOARD_NAME;
     wsClient.send(WS_msg);
+    digitalWrite(GREEN_LED, LOW);
   } 
 
   else {
+    digitalWrite(GREEN_LED, HIGH);
     Serial.println("Not Connected!");
     Serial.println(connected);
   }
@@ -398,6 +460,27 @@ void checkToSendMessage() {
 //====================================================
 // websocket machine
 //====================================================
+
+
+//====================================================
+// json machine
+//====================================================
+
+void JsonMachine(void)() {
+    DeserializationError error = deserializeJson(jsonPacket, message);
+
+  // Test if parsing succeeds.
+  if (error) {
+    Serial.print(F("deserializeJson() failed: "));
+    Serial.println(error.f_str());
+    return;
+  }
+}
+
+//====================================================
+// end json machine
+//====================================================
+
 
 //====================================================
 // end functions
