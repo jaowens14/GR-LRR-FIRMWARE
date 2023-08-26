@@ -50,7 +50,6 @@ uint64_t now                    = 0;
 bool connected = false;
 bool wsFlag = 0;
 volatile int wsDelay = 0;
-String jsonMessage = "";
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -63,6 +62,7 @@ String jsonMessage = "";
 #define STEPPER_DIRECTION_PIN 5
 AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
 int stepper1Position = 0;
+int stepperCommand = 0;
 long stepperSpeed = 0;
 //====================================================
 // end stepper definitions
@@ -75,6 +75,7 @@ long stepperSpeed = 0;
 //====================================================
 #include <ArduinoJson.h>
 StaticJsonDocument<256> jsonPacket;
+String jsonMessage = "";
 
 
 
@@ -158,9 +159,10 @@ enum wsStates {
 wsStates wsState;
 
 enum StepperStates { 
+  STEPPER_STOPPED,
   STEPPER_FORWARD,
-  STEPPER_BACKWARD,
-  STEPPER_STOPPED
+  STEPPER_BACKWARD
+  
 };
 StepperStates stepperState;
 
@@ -266,7 +268,6 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   StepperMachine();
-
 }
 //====================================================
 // end main loop
@@ -349,6 +350,7 @@ void RedLedMachine() {
 // stepper machine
 //====================================================
 void StepperMachine(void) {
+  stepper1.setMaxSpeed(stepperSpeed);
   switch(stepperState) {
     case STEPPER_STOPPED:
       stepper1.stop();
@@ -401,6 +403,8 @@ void onMessageCallback(WebsocketsMessage message) {
     Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
+    JsonMachine();
+
   }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
@@ -466,14 +470,29 @@ void checkToSendMessage() {
 // json machine
 //====================================================
 
-void JsonMachine(void)() {
-    DeserializationError error = deserializeJson(jsonPacket, message);
+void JsonMachine(void) {
+    DeserializationError error = deserializeJson(jsonPacket, jsonMessage);
 
   // Test if parsing succeeds.
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
-    return;
+  }
+
+  stepperSpeed = jsonPacket["stepper_speed"];
+  stepperCommand = jsonPacket["stepper_command"];
+    switch(stepperCommand) {
+    case 0:
+      stepperState = STEPPER_STOPPED;
+    break;
+    case 1:
+      stepperState = STEPPER_FORWARD;
+    break;
+    case 2:
+      stepperState = STEPPER_BACKWARD;
+    break;
+    default:
+    break;
   }
 }
 
