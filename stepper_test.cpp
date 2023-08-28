@@ -18,9 +18,9 @@ AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTI
  
 void setup()
 {  
-    stepper1.setMaxSpeed(200.0);
-    stepper1.setAcceleration(100.0);
-    stepper1.moveTo(24);
+    stepper1.setMaxSpeed(10000.0);
+    stepper1.setAcceleration(10000.0);
+    stepper1.moveTo(2400);
     
 
   

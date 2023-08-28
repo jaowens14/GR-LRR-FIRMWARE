@@ -11,14 +11,16 @@
 //====================================================
 
 
+
+
 //====================================================
 // included libraries
 //====================================================
 #include <Arduino.h>
-
 //====================================================
 // end included libraries
 //====================================================
+
 
 
 
@@ -34,25 +36,23 @@
 #define _WEBSOCKETS_LOGLEVEL_     3
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
-
 #define WEBSOCKETS_PORT     8080
 #define WEBSOCKETS_HOST     "192.168.3.1"
 const char* ssid = "GR-LRR_POC"; //Enter SSID
 const char* password = "GR-LRR_POC"; //Enter Password
-
-
 using namespace websockets2_generic;
-
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
-
 uint64_t heartbeatTimestamp     = 0;
 uint64_t now                    = 0;
-bool connected = false;
+bool wsConnected = false;
 bool wsFlag = 0;
 volatile int wsDelay = 0;
 //====================================================
 // end wifi and websockets definitions
 //====================================================
+
+
+
 
 //====================================================
 // stepper definitions
@@ -67,25 +67,72 @@ long stepperSpeed = 0;
 //====================================================
 // end stepper definitions
 //====================================================
-//
-//
-//
+
+
+
+
+
+//====================================================
+// ultrasonic definitions
+//====================================================
+#define ULTRASONIC_PIN 3
+long duration = 0; 
+long distance = 0;
+long ultrasonic_value = 0;
+volatile int ultrasonicDelay = 0;
+bool ultrasonicFlag = 0;
+long current_time = 0;
+//====================================================
+// end ultrasonic definitions
+//====================================================
+
+
+//====================================================
+// led definitions
+//====================================================
+#define RED_LED     LEDR
+#define GREEN_LED   LEDG
+#define BLUE_LED    LEDB
+bool redLedFlag = false;
+bool blueLedFlag = false;
+volatile int redLedDelay = 0;
+volatile int blueLedDelay = 0;
+//====================================================
+// end led definitions
+//====================================================
+
+
+
+
+//====================================================
+// relay definitions
+//====================================================
+#define RELAY_PIN 2
+bool relayFlag = false;
+volatile int relayDelay = 0;
+bool estop = false;
+//====================================================
+// end relay definitions
+//====================================================
+
+
+
+
 //====================================================
 // json definitions
 //====================================================
 #include <ArduinoJson.h>
+// json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
 StaticJsonDocument<256> jsonPacket;
+// json message is a string that contains all the info smashed together
 String jsonMessage = "";
-
-
-
 //====================================================
 // end json definitions
 //====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // ip address definitions
 //====================================================
@@ -100,10 +147,10 @@ IPAddress nmask(255, 255, 255, 0);
 //====================================================
 // end ip address definitions
 //====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // function prototypes
 //====================================================
@@ -111,37 +158,25 @@ void setup(void);
 void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
+void UltrasonicMachine(void);
+void RelayMachine(void);
 void StepperMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
 void checkToSendMessage(void);
-void JsonMachine(void);
-
+void ReceiveJsonMachine(void);
+void SendJsonMachine(void);
+void CommandToEnumState(void);
+long microsecondsToCentimeters(long);
 //====================================================
 // end function prototypes
 //====================================================
-//
-//
-//
-//====================================================
-// led definitions
-//====================================================
-#define RED_LED     LEDR
-#define GREEN_LED   LEDG
-#define BLUE_LED    LEDB
-bool redLedFlag = false;
-bool blueLedFlag = false;
-volatile int redLedDelay = 0;
-volatile int blueLedDelay = 0;
-//====================================================
-// end led definitions
-//====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // states
 //====================================================
@@ -162,10 +197,21 @@ enum StepperStates {
   STEPPER_STOPPED,
   STEPPER_FORWARD,
   STEPPER_BACKWARD
-  
 };
 StepperStates stepperState;
 
+
+enum UltrasonicStates {
+  UT_WAITING,
+  UT_READING
+};
+UltrasonicStates UltrasonicState;
+
+enum RelayStates {
+  RELAY_OFF,
+  RELAY_ON
+};
+RelayStates RelayState;
 
 //====================================================
 // end states
@@ -179,12 +225,10 @@ StepperStates stepperState;
 WebsocketsServer wsServer;
 WebsocketsMessage wsMessage;
 WebsocketsClient wsClient;
-
-//Vector<WebsocketsClient> allClients;
-
 //====================================================
 // end objects
 //====================================================
+
 
 
 
@@ -200,6 +244,8 @@ void TimerHandler() {
   if ((interruptCounter % 10000) == 0) {
         if (redLedDelay) redLedDelay--;
         if (wsDelay) wsDelay--;
+        if (ultrasonicDelay) ultrasonicDelay--;
+        if (relayDelay) relayDelay--;
   }
 
   // every second
@@ -216,6 +262,7 @@ Portenta_H7_Timer ITimer(TIM16);
 
 
 
+
 //====================================================
 // setup
 //====================================================
@@ -226,11 +273,11 @@ void setup() {
   Serial.begin(115200);
 
   // wifi setup
-  while (!Serial && millis() < 3000);
+  while (!Serial && millis() < 2000);
   WiFi.config(local, testdns, gateway, nmask);
   delay(500);
   WiFi.beginAP(ssid, password);
-  while (WiFi.status() != WL_CONNECTED && millis() < 10000);
+  while (WiFi.status() != WL_CONNECTED && millis() < 5000);
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
@@ -244,9 +291,12 @@ void setup() {
 
 
   // stepper setup
-    stepper1.setMaxSpeed(10000.0);
-    stepper1.setAcceleration(750000.0);
+  stepper1.setMaxSpeed(10000.0);
+  stepper1.setAcceleration(750000.0);
   // end stepper setup
+
+  // relay setup
+  RelayState = RELAY_ON;
 
 }
 //====================================================
@@ -259,14 +309,14 @@ void setup() {
 //====================================================
 // main loop
 //====================================================
-
-
 void loop() {
 
   BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
+  UltrasonicMachine();
   StepperMachine();
+  RelayMachine();
 }
 //====================================================
 // end main loop
@@ -275,11 +325,9 @@ void loop() {
 
 
 
-
 //====================================================
 // functions
 //====================================================
-
 //====================================================
 // blue led machine
 //====================================================
@@ -310,6 +358,8 @@ void BlueLedMachine() {
 //====================================================
 // end blue led machine
 //====================================================
+
+
 
 
 //====================================================
@@ -345,6 +395,76 @@ void RedLedMachine() {
 
 
 
+
+//====================================================
+// ultrasonic machine
+//====================================================
+void UltrasonicMachine() {
+  switch(UltrasonicState){
+    case UT_WAITING:
+      if (!ultrasonicDelay && !ultrasonicFlag) {
+        UltrasonicState = UT_READING;
+      }
+      pinMode(ULTRASONIC_PIN, OUTPUT);
+      digitalWrite(ULTRASONIC_PIN, LOW);
+    break;
+    case UT_READING:
+      current_time = micros();
+      digitalWrite(ULTRASONIC_PIN, HIGH);
+      if (micros() == current_time + 5.0) {
+        digitalWrite(ULTRASONIC_PIN, LOW);
+        pinMode(ULTRASONIC_PIN, INPUT);
+        duration = pulseIn(ULTRASONIC_PIN, HIGH);
+        ultrasonic_value = microsecondsToCentimeters(duration);
+      }
+      ultrasonicDelay = 3;
+      UltrasonicState = UT_WAITING;
+    break;
+    default:
+    break;
+  }
+
+}
+
+long microsecondsToCentimeters(long microseconds) {
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the object we
+  // take half of the distance travelled.
+  return microseconds / 29 / 2;
+}
+//====================================================
+// end ultrasonic machine
+//====================================================
+
+//====================================================
+// relay machine
+//====================================================
+void RelayMachine(void){
+  switch(RelayState) {
+    case RELAY_OFF: // relay is off waiting for connection
+      digitalWrite(RELAY_PIN, LOW);
+      if (wsConnected && !estop) {
+        RelayState = RELAY_ON;
+        relayFlag = 1;
+      }
+    break;
+    case RELAY_ON: // relay is on and we are working
+      digitalWrite(RELAY_PIN, HIGH);
+      if (!wsConnected || estop) {
+        RelayState = RELAY_OFF;
+        relayFlag = 0;
+      }
+    break;
+    default:
+    break;
+
+
+  }
+}
+//====================================================
+// end relay machine
+//====================================================
+
 //====================================================
 // stepper machine
 //====================================================
@@ -362,7 +482,6 @@ void StepperMachine(void) {
     default:
     break;
   }
-  
   stepper1.run();
 
 }
@@ -370,13 +489,15 @@ void StepperMachine(void) {
 // end stepper machine
 //====================================================
 
+
+
+
 //====================================================
 // websocket machine
 //====================================================
-
 void WebSocketMachine() {
 
-  connected = wsClient.available();
+  wsConnected = wsClient.available();
   checkToSendMessage();
   
   // let the websockets client check for incoming messages
@@ -394,15 +515,45 @@ void WebSocketMachine() {
 
 }
 
+void checkToSendMessage() {
+  #define REPEAT_INTERVAL    1000L
+  static unsigned long checkstatus_timeout = 1000;
+  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
+  if (millis() > checkstatus_timeout) {
+    sendMessage();
+    checkstatus_timeout = millis() + REPEAT_INTERVAL;
+  }
+}
 
+void sendMessage() {
+  // try to connect to Websockets server
+  if (!wsConnected) {
+    wsClient = wsServer.accept();
+    wsConnected = wsClient.available();
+    // run callback when messages are received
+    wsClient.onMessage(onMessageCallback);
+    // run callback when events are occuring
+    wsClient.onEvent(onEventsCallback);
+  }
+  
+  if (wsConnected) {
+    Serial.println("Connected!");
+    digitalWrite(GREEN_LED, LOW);
+  } 
+
+  else {
+    digitalWrite(GREEN_LED, HIGH);
+    Serial.println("Not Connected!");
+    //Serial.println(wsConnected);
+  }
+}
 
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Got Message: ");
     Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
-    JsonMachine();
-
+    ReceiveJsonMachine();
   }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
@@ -417,86 +568,85 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    Serial.println("Got a Ping!");
+    //Serial.println("Got a Ping!");
+    Serial.println(ultrasonic_value);
+    SendJsonMachine();
+    wsClient.send(jsonMessage);
+
   }
 
   else if (event == WebsocketsEvent::GotPong) {
     Serial.println("Got a Pong!");
   }
 }
+//====================================================
+// end websocket machine
+//====================================================
 
-void sendMessage() {
-  // try to connect to Websockets server
-  if (!connected) {
-    wsClient = wsServer.accept();
-    connected = wsClient.available();
-    // run callback when messages are received
-    wsClient.onMessage(onMessageCallback);
-    // run callback when events are occuring
-    wsClient.onEvent(onEventsCallback);
-  }
-  
-  if (connected) {
-    Serial.println("Connected!");
-    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    wsClient.send(WS_msg);
-    digitalWrite(GREEN_LED, LOW);
-  } 
 
-  else {
-    digitalWrite(GREEN_LED, HIGH);
-    Serial.println("Not Connected!");
-    Serial.println(connected);
-  }
-}
-
-void checkToSendMessage() {
-  #define REPEAT_INTERVAL    1000L
-  static unsigned long checkstatus_timeout = 1000;
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout) {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
+//====================================================
+// send json machine
+//====================================================
+void SendJsonMachine(void) {
+  jsonPacket.clear();
+  jsonMessage = "";
+  jsonPacket["stepper_speed"] = stepperSpeed;
+  jsonPacket["stepper_command"] = stepperCommand;
+  jsonPacket["ultrasonic_value"] = ultrasonic_value;
+  jsonPacket["relay_flag"] = relayFlag;
+  serializeJson(jsonPacket, jsonMessage);
 }
 //====================================================
-// websocket machine
+// end send json machine
 //====================================================
 
 
 //====================================================
-// json machine
+// receive json machine
 //====================================================
-
-void JsonMachine(void) {
+void ReceiveJsonMachine(void) {
     DeserializationError error = deserializeJson(jsonPacket, jsonMessage);
-
   // Test if parsing succeeds.
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
   }
-
-  stepperSpeed = float(jsonPacket["stepper_speed"]);
+  stepperSpeed = long(jsonPacket["stepper_speed"]);
   stepper1.setMaxSpeed(stepperSpeed);
-  stepperCommand = jsonPacket["stepper_command"];
-    switch(stepperCommand) {
-    case 0:
-      stepperState = STEPPER_STOPPED;
-    break;
-    case 1:
-      stepperState = STEPPER_FORWARD;
-    break;
-    case 2:
-      stepperState = STEPPER_BACKWARD;
-    break;
-    default:
-    break;
-  }
+  stepperCommand = int(jsonPacket["stepper_command"]);
+  estop = bool(jsonPacket["relay_flag"]);
+  CommandToEnumState();
+  jsonPacket.clear();
+  jsonMessage = "";
 }
+//====================================================
+// end receive json machine
+//====================================================
+
+
 
 //====================================================
-// end json machine
+// stepper command string to enum state
+//====================================================
+void CommandToEnumState(void) {
+  Serial.println("Got command: ");
+  Serial.println(stepperCommand);
+  switch(stepperCommand) {
+      case 0:
+        stepperState = STEPPER_STOPPED;
+      break;
+      case 1:
+        stepperState = STEPPER_FORWARD;
+      break;
+      case 2:
+        stepperState = STEPPER_BACKWARD;
+      break;
+      default:
+      break;
+    }
+  }
+//====================================================
+// end stepper command string to enum state
 //====================================================
 
 

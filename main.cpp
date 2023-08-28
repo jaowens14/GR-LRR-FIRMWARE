@@ -11,14 +11,16 @@
 //====================================================
 
 
+
+
 //====================================================
 // included libraries
 //====================================================
 #include <Arduino.h>
-
 //====================================================
 // end included libraries
 //====================================================
+
 
 
 
@@ -34,17 +36,12 @@
 #define _WEBSOCKETS_LOGLEVEL_     3
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
-
 #define WEBSOCKETS_PORT     8080
 #define WEBSOCKETS_HOST     "192.168.3.1"
 const char* ssid = "GR-LRR_POC"; //Enter SSID
 const char* password = "GR-LRR_POC"; //Enter Password
-
-
 using namespace websockets2_generic;
-
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
-
 uint64_t heartbeatTimestamp     = 0;
 uint64_t now                    = 0;
 bool connected = false;
@@ -53,6 +50,9 @@ volatile int wsDelay = 0;
 //====================================================
 // end wifi and websockets definitions
 //====================================================
+
+
+
 
 //====================================================
 // stepper definitions
@@ -67,25 +67,40 @@ long stepperSpeed = 0;
 //====================================================
 // end stepper definitions
 //====================================================
-//
-//
-//
+
+
+
+
+
+//====================================================
+// ultrasonic definitions
+//====================================================
+#define ULTRASONIC_PIN 3
+long duration = 0; 
+long distance = 0;
+long ultrasonic_value = 0;
+//====================================================
+// end ultrasonic definitions
+//====================================================
+
+
+
+
 //====================================================
 // json definitions
 //====================================================
 #include <ArduinoJson.h>
+// json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
 StaticJsonDocument<256> jsonPacket;
+// json message is a string that contains all the info smashed together
 String jsonMessage = "";
-
-
-
 //====================================================
 // end json definitions
 //====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // ip address definitions
 //====================================================
@@ -100,10 +115,10 @@ IPAddress nmask(255, 255, 255, 0);
 //====================================================
 // end ip address definitions
 //====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // function prototypes
 //====================================================
@@ -111,20 +126,24 @@ void setup(void);
 void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
+void UltrasonicMachine(void);
 void StepperMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
 void checkToSendMessage(void);
-void JsonMachine(void);
-
+void ReceiveJsonMachine(void);
+void SendJsonMachine(void);
+void CommandToEnumState(void);
+long microsecondsToCentimeters(long);
 //====================================================
 // end function prototypes
 //====================================================
-//
-//
-//
+
+
+
+
 //====================================================
 // led definitions
 //====================================================
@@ -138,10 +157,10 @@ volatile int blueLedDelay = 0;
 //====================================================
 // end led definitions
 //====================================================
-//
-//
-//
-//
+
+
+
+
 //====================================================
 // states
 //====================================================
@@ -162,11 +181,8 @@ enum StepperStates {
   STEPPER_STOPPED,
   STEPPER_FORWARD,
   STEPPER_BACKWARD
-  
 };
 StepperStates stepperState;
-
-
 //====================================================
 // end states
 //====================================================
@@ -179,12 +195,10 @@ StepperStates stepperState;
 WebsocketsServer wsServer;
 WebsocketsMessage wsMessage;
 WebsocketsClient wsClient;
-
-//Vector<WebsocketsClient> allClients;
-
 //====================================================
 // end objects
 //====================================================
+
 
 
 
@@ -216,6 +230,7 @@ Portenta_H7_Timer ITimer(TIM16);
 
 
 
+
 //====================================================
 // setup
 //====================================================
@@ -226,11 +241,11 @@ void setup() {
   Serial.begin(115200);
 
   // wifi setup
-  while (!Serial && millis() < 3000);
+  while (!Serial && millis() < 2000);
   WiFi.config(local, testdns, gateway, nmask);
   delay(500);
   WiFi.beginAP(ssid, password);
-  while (WiFi.status() != WL_CONNECTED && millis() < 10000);
+  while (WiFi.status() != WL_CONNECTED && millis() < 5000);
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
@@ -244,8 +259,8 @@ void setup() {
 
 
   // stepper setup
-    stepper1.setMaxSpeed(10000.0);
-    stepper1.setAcceleration(750000.0);
+  stepper1.setMaxSpeed(10000.0);
+  stepper1.setAcceleration(750000.0);
   // end stepper setup
 
 }
@@ -259,13 +274,12 @@ void setup() {
 //====================================================
 // main loop
 //====================================================
-
-
 void loop() {
 
   BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
+  //UltrasonicMachine();
   StepperMachine();
 }
 //====================================================
@@ -275,11 +289,9 @@ void loop() {
 
 
 
-
 //====================================================
 // functions
 //====================================================
-
 //====================================================
 // blue led machine
 //====================================================
@@ -310,6 +322,8 @@ void BlueLedMachine() {
 //====================================================
 // end blue led machine
 //====================================================
+
+
 
 
 //====================================================
@@ -345,6 +359,50 @@ void RedLedMachine() {
 
 
 
+
+//====================================================
+// ultrasonic machine
+//====================================================
+void UltrasonicMachine() {
+  // establish variables for duration of the ping, and the distance result
+  // in inches and centimeters:
+
+  // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
+  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  pinMode(ULTRASONIC_PIN, OUTPUT);
+  digitalWrite(ULTRASONIC_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC_PIN, HIGH);
+  delayMicroseconds(5);
+  digitalWrite(ULTRASONIC_PIN, LOW);
+
+  // The same pin is used to read the signal from the PING))): a HIGH pulse
+  // whose duration is the time (in microseconds) from the sending of the ping
+  // to the reception of its echo off of an object.
+  pinMode(ULTRASONIC_PIN, INPUT);
+  duration = pulseIn(ULTRASONIC_PIN, HIGH);
+
+  // convert the time into a distance
+  distance = microsecondsToCentimeters(duration);
+
+  ultrasonic_value = distance;
+
+}
+
+
+long microsecondsToCentimeters(long microseconds) {
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the object we
+  // take half of the distance travelled.
+  return microseconds / 29 / 2;
+}
+//====================================================
+// end ultrasonic machine
+//====================================================
+
+
+
+
 //====================================================
 // stepper machine
 //====================================================
@@ -362,7 +420,6 @@ void StepperMachine(void) {
     default:
     break;
   }
-  
   stepper1.run();
 
 }
@@ -370,10 +427,12 @@ void StepperMachine(void) {
 // end stepper machine
 //====================================================
 
+
+
+
 //====================================================
 // websocket machine
 //====================================================
-
 void WebSocketMachine() {
 
   connected = wsClient.available();
@@ -394,34 +453,13 @@ void WebSocketMachine() {
 
 }
 
-
-
-void onMessageCallback(WebsocketsMessage message) {
-    Serial.print("Got Message: ");
-    Serial.println(message.data());
-    // save string message to global variable 
-    jsonMessage = message.data();
-    JsonMachine();
-
-  }
-
-void onEventsCallback(WebsocketsEvent event, String data) {
-  (void) data;
-  
-  if (event == WebsocketsEvent::ConnectionOpened) {
-    Serial.println("Connnection Opened");
-  } 
-
-  else if (event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println("Connnection Closed");
-  }
-
-  else if (event == WebsocketsEvent::GotPing) {
-    Serial.println("Got a Ping!");
-  }
-
-  else if (event == WebsocketsEvent::GotPong) {
-    Serial.println("Got a Pong!");
+void checkToSendMessage() {
+  #define REPEAT_INTERVAL    1000L
+  static unsigned long checkstatus_timeout = 1000;
+  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
+  if (millis() > checkstatus_timeout) {
+    sendMessage();
+    checkstatus_timeout = millis() + REPEAT_INTERVAL;
   }
 }
 
@@ -438,8 +476,10 @@ void sendMessage() {
   
   if (connected) {
     Serial.println("Connected!");
-    String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    wsClient.send(WS_msg);
+    //String WS_msg = String("Hello to Server from ") + BOARD_NAME;
+    //wsClient.send(WS_msg);
+    //SendJsonMachine();
+    //wsClient.send(jsonMessage);
     digitalWrite(GREEN_LED, LOW);
   } 
 
@@ -450,53 +490,97 @@ void sendMessage() {
   }
 }
 
-void checkToSendMessage() {
-  #define REPEAT_INTERVAL    1000L
-  static unsigned long checkstatus_timeout = 1000;
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout) {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
+void onMessageCallback(WebsocketsMessage message) {
+    Serial.print("Got Message: ");
+    Serial.println(message.data());
+    // save string message to global variable 
+    jsonMessage = message.data();
+    ReceiveJsonMachine();
+  }
+
+void onEventsCallback(WebsocketsEvent event, String data) {
+  (void) data;
+  
+  if (event == WebsocketsEvent::ConnectionOpened) {
+    Serial.println("Connnection Opened");
+  } 
+
+  else if (event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println("Connnection Closed");
+  }
+
+  else if (event == WebsocketsEvent::GotPing) {
+    Serial.println("Got a Ping!");
+    Serial.println(ultrasonic_value);
+
+  }
+
+  else if (event == WebsocketsEvent::GotPong) {
+    Serial.println("Got a Pong!");
   }
 }
 //====================================================
-// websocket machine
+// end websocket machine
 //====================================================
 
 
 //====================================================
-// json machine
+// send json machine
+//====================================================
+void SendJsonMachine(void) {
+  jsonPacket["stepper_speed"] = stepperSpeed;
+  jsonPacket["stepper_command"] = stepperCommand;
+  jsonPacket["ultrasonic_value"] = ultrasonic_value;
+  serializeJson(jsonPacket, jsonMessage);
+}
+//====================================================
+// end send json machine
 //====================================================
 
-void JsonMachine(void) {
+
+//====================================================
+// receive json machine
+//====================================================
+void ReceiveJsonMachine(void) {
     DeserializationError error = deserializeJson(jsonPacket, jsonMessage);
-
   // Test if parsing succeeds.
   if (error) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
   }
-
-  stepperSpeed = float(jsonPacket["stepper_speed"]);
+  stepperSpeed = long(jsonPacket["stepper_speed"]);
   stepper1.setMaxSpeed(stepperSpeed);
-  stepperCommand = jsonPacket["stepper_command"];
-    switch(stepperCommand) {
-    case 0:
-      stepperState = STEPPER_STOPPED;
-    break;
-    case 1:
-      stepperState = STEPPER_FORWARD;
-    break;
-    case 2:
-      stepperState = STEPPER_BACKWARD;
-    break;
-    default:
-    break;
-  }
+  stepperCommand = int(jsonPacket["stepper_command"]);
+  CommandToEnumState();
 }
+//====================================================
+// end receive json machine
+//====================================================
+
+
 
 //====================================================
-// end json machine
+// stepper command string to enum state
+//====================================================
+void CommandToEnumState(void) {
+  Serial.println("Got command: ");
+  Serial.println(stepperCommand);
+  switch(stepperCommand) {
+      case 0:
+        stepperState = STEPPER_STOPPED;
+      break;
+      case 1:
+        stepperState = STEPPER_FORWARD;
+      break;
+      case 2:
+        stepperState = STEPPER_BACKWARD;
+      break;
+      default:
+      break;
+    }
+  }
+//====================================================
+// end stepper command string to enum state
 //====================================================
 
 
