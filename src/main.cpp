@@ -64,6 +64,7 @@ AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTI
 int stepper1Position = 0;
 int stepperCommand = 0;
 long stepperSpeed = 0;
+int microstep = 16; // setting on the tmc2209 driver...
 //====================================================
 // end stepper definitions
 //====================================================
@@ -474,10 +475,10 @@ void StepperMachine(void) {
       stepper1.stop();
     break;
     case STEPPER_FORWARD:
-      stepper1.move(10);
+      stepper1.move(200*microstep);
     break;
     case STEPPER_BACKWARD:
-      stepper1.move(-10);
+      stepper1.move(-200*microstep);
     break;
     default:
     break;
@@ -485,6 +486,8 @@ void StepperMachine(void) {
   stepper1.run();
 
 }
+
+
 //====================================================
 // end stepper machine
 //====================================================
