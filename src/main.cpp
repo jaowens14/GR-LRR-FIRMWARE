@@ -33,7 +33,7 @@
 #define WEBSOCKETS_USE_PORTENTA_H7_WIFI           true
 #define DEBUG_WEBSOCKETS_PORT     Serial
 // Debug Level from 0 to 4
-#define _WEBSOCKETS_LOGLEVEL_     3
+#define _WEBSOCKETS_LOGLEVEL_     4
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
@@ -75,7 +75,7 @@ long stepperSpeed = 0;
 //====================================================
 // ultrasonic definitions
 //====================================================
-#define ULTRASONIC_PIN 3
+#define ULTRASONIC_PIN A6
 long duration = 0; 
 long distance = 0;
 long ultrasonic_value = 0;
@@ -240,12 +240,16 @@ volatile int interruptCounter;
 void TimerHandler() { 
   interruptCounter++;
 
+    // every 1/1000 second
+  if ((interruptCounter % 100) == 0) {
+    if (ultrasonicDelay) ultrasonicDelay--;
+  }
+
     // every 1/10 second
   if ((interruptCounter % 10000) == 0) {
-        if (redLedDelay) redLedDelay--;
-        if (wsDelay) wsDelay--;
-        if (ultrasonicDelay) ultrasonicDelay--;
-        if (relayDelay) relayDelay--;
+    if (redLedDelay) redLedDelay--;
+    if (wsDelay) wsDelay--;
+    if (relayDelay) relayDelay--;
   }
 
   // every second
@@ -297,6 +301,11 @@ void setup() {
 
   // relay setup
   RelayState = RELAY_ON;
+
+
+  // ultrasonic setup
+  analogReadResolution(16);
+  pinMode(ULTRASONIC_PIN, INPUT);
 
 }
 //====================================================
@@ -402,22 +411,13 @@ void RedLedMachine() {
 void UltrasonicMachine() {
   switch(UltrasonicState){
     case UT_WAITING:
-      if (!ultrasonicDelay && !ultrasonicFlag) {
+      if (!ultrasonicDelay) {
         UltrasonicState = UT_READING;
       }
-      pinMode(ULTRASONIC_PIN, OUTPUT);
-      digitalWrite(ULTRASONIC_PIN, LOW);
     break;
     case UT_READING:
-      current_time = micros();
-      digitalWrite(ULTRASONIC_PIN, HIGH);
-      if (micros() == current_time + 5.0) {
-        digitalWrite(ULTRASONIC_PIN, LOW);
-        pinMode(ULTRASONIC_PIN, INPUT);
-        duration = pulseIn(ULTRASONIC_PIN, HIGH);
-        ultrasonic_value = microsecondsToCentimeters(duration);
-      }
-      ultrasonicDelay = 3;
+      ultrasonic_value = analogRead(ULTRASONIC_PIN);
+      ultrasonicDelay = 40;
       UltrasonicState = UT_WAITING;
     break;
     default:
@@ -565,6 +565,8 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
     Serial.println("Connnection Closed");
+    Serial.println(wsClient.getCloseReason());
+    delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {

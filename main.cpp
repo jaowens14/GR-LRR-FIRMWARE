@@ -44,7 +44,7 @@ using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
 uint64_t now                    = 0;
-bool connected = false;
+bool wsConnected = false;
 bool wsFlag = 0;
 volatile int wsDelay = 0;
 //====================================================
@@ -79,8 +79,40 @@ long stepperSpeed = 0;
 long duration = 0; 
 long distance = 0;
 long ultrasonic_value = 0;
+volatile int ultrasonicDelay = 0;
+bool ultrasonicFlag = 0;
+long current_time = 0;
 //====================================================
 // end ultrasonic definitions
+//====================================================
+
+
+//====================================================
+// led definitions
+//====================================================
+#define RED_LED     LEDR
+#define GREEN_LED   LEDG
+#define BLUE_LED    LEDB
+bool redLedFlag = false;
+bool blueLedFlag = false;
+volatile int redLedDelay = 0;
+volatile int blueLedDelay = 0;
+//====================================================
+// end led definitions
+//====================================================
+
+
+
+
+//====================================================
+// relay definitions
+//====================================================
+#define RELAY_PIN 2
+bool relayFlag = false;
+volatile int relayDelay = 0;
+bool estop = false;
+//====================================================
+// end relay definitions
 //====================================================
 
 
@@ -127,6 +159,7 @@ void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
+void RelayMachine(void);
 void StepperMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
@@ -139,23 +172,6 @@ void CommandToEnumState(void);
 long microsecondsToCentimeters(long);
 //====================================================
 // end function prototypes
-//====================================================
-
-
-
-
-//====================================================
-// led definitions
-//====================================================
-#define RED_LED     LEDR
-#define GREEN_LED   LEDG
-#define BLUE_LED    LEDB
-bool redLedFlag = false;
-bool blueLedFlag = false;
-volatile int redLedDelay = 0;
-volatile int blueLedDelay = 0;
-//====================================================
-// end led definitions
 //====================================================
 
 
@@ -183,6 +199,20 @@ enum StepperStates {
   STEPPER_BACKWARD
 };
 StepperStates stepperState;
+
+
+enum UltrasonicStates {
+  UT_WAITING,
+  UT_READING
+};
+UltrasonicStates UltrasonicState;
+
+enum RelayStates {
+  RELAY_OFF,
+  RELAY_ON
+};
+RelayStates RelayState;
+
 //====================================================
 // end states
 //====================================================
@@ -214,6 +244,8 @@ void TimerHandler() {
   if ((interruptCounter % 10000) == 0) {
         if (redLedDelay) redLedDelay--;
         if (wsDelay) wsDelay--;
+        if (ultrasonicDelay) ultrasonicDelay--;
+        if (relayDelay) relayDelay--;
   }
 
   // every second
@@ -263,6 +295,9 @@ void setup() {
   stepper1.setAcceleration(750000.0);
   // end stepper setup
 
+  // relay setup
+  RelayState = RELAY_ON;
+
 }
 //====================================================
 // end setup
@@ -279,8 +314,9 @@ void loop() {
   BlueLedMachine();
   //RedLedMachine();
   WebSocketMachine();
-  //UltrasonicMachine();
+  UltrasonicMachine();
   StepperMachine();
+  RelayMachine();
 }
 //====================================================
 // end main loop
@@ -364,31 +400,31 @@ void RedLedMachine() {
 // ultrasonic machine
 //====================================================
 void UltrasonicMachine() {
-  // establish variables for duration of the ping, and the distance result
-  // in inches and centimeters:
-
-  // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
-  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
-  pinMode(ULTRASONIC_PIN, OUTPUT);
-  digitalWrite(ULTRASONIC_PIN, LOW);
-  delayMicroseconds(2);
-  digitalWrite(ULTRASONIC_PIN, HIGH);
-  delayMicroseconds(5);
-  digitalWrite(ULTRASONIC_PIN, LOW);
-
-  // The same pin is used to read the signal from the PING))): a HIGH pulse
-  // whose duration is the time (in microseconds) from the sending of the ping
-  // to the reception of its echo off of an object.
-  pinMode(ULTRASONIC_PIN, INPUT);
-  duration = pulseIn(ULTRASONIC_PIN, HIGH);
-
-  // convert the time into a distance
-  distance = microsecondsToCentimeters(duration);
-
-  ultrasonic_value = distance;
+  switch(UltrasonicState){
+    case UT_WAITING:
+      if (!ultrasonicDelay && !ultrasonicFlag) {
+        UltrasonicState = UT_READING;
+      }
+      pinMode(ULTRASONIC_PIN, OUTPUT);
+      digitalWrite(ULTRASONIC_PIN, LOW);
+    break;
+    case UT_READING:
+      current_time = micros();
+      digitalWrite(ULTRASONIC_PIN, HIGH);
+      if (micros() == current_time + 5.0) {
+        digitalWrite(ULTRASONIC_PIN, LOW);
+        pinMode(ULTRASONIC_PIN, INPUT);
+        duration = pulseIn(ULTRASONIC_PIN, HIGH);
+        ultrasonic_value = microsecondsToCentimeters(duration);
+      }
+      ultrasonicDelay = 3;
+      UltrasonicState = UT_WAITING;
+    break;
+    default:
+    break;
+  }
 
 }
-
 
 long microsecondsToCentimeters(long microseconds) {
   // The speed of sound is 340 m/s or 29 microseconds per centimeter.
@@ -400,8 +436,34 @@ long microsecondsToCentimeters(long microseconds) {
 // end ultrasonic machine
 //====================================================
 
+//====================================================
+// relay machine
+//====================================================
+void RelayMachine(void){
+  switch(RelayState) {
+    case RELAY_OFF: // relay is off waiting for connection
+      digitalWrite(RELAY_PIN, LOW);
+      if (wsConnected && !estop) {
+        RelayState = RELAY_ON;
+        relayFlag = 1;
+      }
+    break;
+    case RELAY_ON: // relay is on and we are working
+      digitalWrite(RELAY_PIN, HIGH);
+      if (!wsConnected || estop) {
+        RelayState = RELAY_OFF;
+        relayFlag = 0;
+      }
+    break;
+    default:
+    break;
 
 
+  }
+}
+//====================================================
+// end relay machine
+//====================================================
 
 //====================================================
 // stepper machine
@@ -435,7 +497,7 @@ void StepperMachine(void) {
 //====================================================
 void WebSocketMachine() {
 
-  connected = wsClient.available();
+  wsConnected = wsClient.available();
   checkToSendMessage();
   
   // let the websockets client check for incoming messages
@@ -465,28 +527,24 @@ void checkToSendMessage() {
 
 void sendMessage() {
   // try to connect to Websockets server
-  if (!connected) {
+  if (!wsConnected) {
     wsClient = wsServer.accept();
-    connected = wsClient.available();
+    wsConnected = wsClient.available();
     // run callback when messages are received
     wsClient.onMessage(onMessageCallback);
     // run callback when events are occuring
     wsClient.onEvent(onEventsCallback);
   }
   
-  if (connected) {
+  if (wsConnected) {
     Serial.println("Connected!");
-    //String WS_msg = String("Hello to Server from ") + BOARD_NAME;
-    //wsClient.send(WS_msg);
-    //SendJsonMachine();
-    //wsClient.send(jsonMessage);
     digitalWrite(GREEN_LED, LOW);
   } 
 
   else {
     digitalWrite(GREEN_LED, HIGH);
     Serial.println("Not Connected!");
-    Serial.println(connected);
+    //Serial.println(wsConnected);
   }
 }
 
@@ -507,11 +565,15 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
     Serial.println("Connnection Closed");
+    Serial.println(wsClient.getCloseReason());
+    delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    Serial.println("Got a Ping!");
+    //Serial.println("Got a Ping!");
     Serial.println(ultrasonic_value);
+    SendJsonMachine();
+    wsClient.send(jsonMessage);
 
   }
 
@@ -528,9 +590,12 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 // send json machine
 //====================================================
 void SendJsonMachine(void) {
+  jsonPacket.clear();
+  jsonMessage = "";
   jsonPacket["stepper_speed"] = stepperSpeed;
   jsonPacket["stepper_command"] = stepperCommand;
   jsonPacket["ultrasonic_value"] = ultrasonic_value;
+  jsonPacket["relay_flag"] = relayFlag;
   serializeJson(jsonPacket, jsonMessage);
 }
 //====================================================
@@ -551,7 +616,10 @@ void ReceiveJsonMachine(void) {
   stepperSpeed = long(jsonPacket["stepper_speed"]);
   stepper1.setMaxSpeed(stepperSpeed);
   stepperCommand = int(jsonPacket["stepper_command"]);
+  estop = bool(jsonPacket["relay_flag"]);
   CommandToEnumState();
+  jsonPacket.clear();
+  jsonMessage = "";
 }
 //====================================================
 // end receive json machine
