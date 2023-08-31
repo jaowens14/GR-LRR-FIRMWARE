@@ -21,7 +21,13 @@
 // end included libraries
 //====================================================
 
-
+//====================================================
+// program m7 core
+//====================================================
+#ifdef CORE_CM7
+//====================================================
+// program m7 core
+//====================================================
 
 
 //====================================================
@@ -52,6 +58,22 @@ volatile int wsDelay = 0;
 //====================================================
 
 
+//====================================================
+// end program m7 core
+//====================================================
+#endif
+//====================================================
+// end program m7 core
+//====================================================
+
+
+//====================================================
+// program m4 core
+//====================================================
+#ifdef CORE_CM4
+//====================================================
+// program m4 core
+//====================================================
 
 
 //====================================================
@@ -64,12 +86,58 @@ AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTI
 int stepper1Position = 0;
 int stepperCommand = 0;
 long stepperSpeed = 0;
-int microstep = 16; // setting on the tmc2209 driver...
 //====================================================
 // end stepper definitions
 //====================================================
 
 
+
+void StepperMachine(void);
+
+enum StepperStates { 
+  STEPPER_STOPPED,
+  STEPPER_FORWARD,
+  STEPPER_BACKWARD
+};
+StepperStates stepperState;
+
+
+//====================================================
+// program m4 core
+//====================================================
+#endif
+//====================================================
+// program m4 core
+//====================================================
+
+//====================================================
+// program m7 core
+//====================================================
+#ifdef CORE_CM7
+//====================================================
+// program m7 core
+//====================================================
+
+//====================================================
+// stepper definitions
+//====================================================
+#include <AccelStepper.h>
+#define STEPPER_STEP_PIN 4
+#define STEPPER_DIRECTION_PIN 5
+AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
+int stepper1Position = 0;
+int stepperCommand = 0;
+long stepperSpeed = 0;
+//====================================================
+// end stepper definitions
+//====================================================
+
+enum StepperStates { 
+  STEPPER_STOPPED,
+  STEPPER_FORWARD,
+  STEPPER_BACKWARD
+};
+StepperStates stepperState;
 
 
 
@@ -161,8 +229,11 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
 void RelayMachine(void);
-void StepperMachine(void);
+
 void WebSocketMachine(void);
+
+
+
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
@@ -194,12 +265,7 @@ enum wsStates {
 };
 wsStates wsState;
 
-enum StepperStates { 
-  STEPPER_STOPPED,
-  STEPPER_FORWARD,
-  STEPPER_BACKWARD
-};
-StepperStates stepperState;
+
 
 
 enum UltrasonicStates {
@@ -268,10 +334,14 @@ Portenta_H7_Timer ITimer(TIM16);
 
 
 
+
+
 //====================================================
-// setup
+// m7 setup
 //====================================================
 void setup() {
+  // boot m4 core
+  bootM4();
   // timer setup
   ITimer.attachInterruptInterval(10, TimerHandler); // is thje timer messing with timeout of the websockets connection??????????
   // debug setup
@@ -310,14 +380,14 @@ void setup() {
 
 }
 //====================================================
-// end setup
+// end m7 setup
 //====================================================
 
 
 
 
 //====================================================
-// main loop
+// m7 main loop
 //====================================================
 void loop() {
 
@@ -325,12 +395,16 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
-  StepperMachine();
+  //StepperMachine();
   RelayMachine();
 }
 //====================================================
-// end main loop
+// end m7 main loop
 //====================================================
+
+
+
+
 
 
 
@@ -466,31 +540,7 @@ void RelayMachine(void){
 // end relay machine
 //====================================================
 
-//====================================================
-// stepper machine
-//====================================================
-void StepperMachine(void) {
-  switch(stepperState) {
-    case STEPPER_STOPPED:
-      stepper1.stop();
-    break;
-    case STEPPER_FORWARD:
-      stepper1.move(200*microstep);
-    break;
-    case STEPPER_BACKWARD:
-      stepper1.move(-200*microstep);
-    break;
-    default:
-    break;
-  }
-  stepper1.run();
 
-}
-
-
-//====================================================
-// end stepper machine
-//====================================================
 
 
 
@@ -630,6 +680,20 @@ void ReceiveJsonMachine(void) {
 
 
 
+
+//====================================================
+// end program m7 core
+//====================================================
+#endif
+//====================================================
+// end program m7 core
+//====================================================
+
+
+
+
+
+
 //====================================================
 // stepper command string to enum state
 //====================================================
@@ -657,4 +721,79 @@ void CommandToEnumState(void) {
 
 //====================================================
 // end functions
+//====================================================
+
+
+
+
+
+
+//====================================================
+// program m4 core
+//====================================================
+#ifdef CORE_CM4
+//====================================================
+// program m4 core
+//====================================================
+
+
+//====================================================
+// m4 setup
+//====================================================
+void setup() {
+ 
+  stepper1.setMaxSpeed(10000.0);
+  stepper1.setAcceleration(750000.0);
+
+}
+//====================================================
+// end m4 setup
+//====================================================
+
+
+
+
+//====================================================
+// m4 main loop
+//====================================================
+void loop() {
+  StepperMachine();
+}
+//====================================================
+// end m4 main loop
+//====================================================
+
+
+//====================================================
+// stepper machine
+//====================================================
+void StepperMachine(void) {
+  switch(stepperState) {
+    case STEPPER_STOPPED:
+      stepper1.stop();
+    break;
+    case STEPPER_FORWARD:
+      stepper1.move(10);
+    break;
+    case STEPPER_BACKWARD:
+      stepper1.move(-10);
+    break;
+    default:
+    break;
+  }
+  stepper1.run();
+
+}
+//====================================================
+// end stepper machine
+//====================================================
+
+
+
+//====================================================
+// end program m4 core
+//====================================================
+#endif
+//====================================================
+// end program m4 core
 //====================================================
