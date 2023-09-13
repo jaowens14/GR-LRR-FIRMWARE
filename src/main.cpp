@@ -11,7 +11,17 @@
 //====================================================
 
 
-
+//====================================================
+// shared data
+//====================================================
+struct shared_data {
+  long stepperSpeed = 0; // buffer
+  int stepperCommand = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+};
+volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
+//====================================================
+// end shared data
+//====================================================
 
 //====================================================
 // included libraries
@@ -21,13 +31,7 @@
 // end included libraries
 //====================================================
 
-//====================================================
-// program m7 core
-//====================================================
-#ifdef CORE_CM7
-//====================================================
-// program m7 core
-//====================================================
+
 
 
 //====================================================
@@ -58,86 +62,24 @@ volatile int wsDelay = 0;
 //====================================================
 
 
-//====================================================
-// end program m7 core
-//====================================================
-#endif
-//====================================================
-// end program m7 core
-//====================================================
-
-
-//====================================================
-// program m4 core
-//====================================================
-#ifdef CORE_CM4
-//====================================================
-// program m4 core
-//====================================================
 
 
 //====================================================
 // stepper definitions
 //====================================================
-#include <AccelStepper.h>
-#define STEPPER_STEP_PIN 4
-#define STEPPER_DIRECTION_PIN 5
-AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-int stepper1Position = 0;
+//#include <AccelStepper.h>
+//#define STEPPER_STEP_PIN 4
+//#define STEPPER_DIRECTION_PIN 5
+//AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
+//int stepper1Position = 0;
 int stepperCommand = 0;
+int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 //====================================================
 // end stepper definitions
 //====================================================
 
 
-
-void StepperMachine(void);
-
-enum StepperStates { 
-  STEPPER_STOPPED,
-  STEPPER_FORWARD,
-  STEPPER_BACKWARD
-};
-StepperStates stepperState;
-
-
-//====================================================
-// program m4 core
-//====================================================
-#endif
-//====================================================
-// program m4 core
-//====================================================
-
-//====================================================
-// program m7 core
-//====================================================
-#ifdef CORE_CM7
-//====================================================
-// program m7 core
-//====================================================
-
-//====================================================
-// stepper definitions
-//====================================================
-#include <AccelStepper.h>
-#define STEPPER_STEP_PIN 4
-#define STEPPER_DIRECTION_PIN 5
-AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-int stepper1Position = 0;
-int stepperCommand = 0;
-long stepperSpeed = 0;
-//====================================================
-// end stepper definitions
-//====================================================
-
-enum StepperStates { 
-  STEPPER_STOPPED,
-  STEPPER_FORWARD,
-  STEPPER_BACKWARD
-};
-StepperStates stepperState;
 
 
 
@@ -229,11 +171,8 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
 void RelayMachine(void);
-
+void StepperSpeedMachine(void);
 void WebSocketMachine(void);
-
-
-
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
 void sendMessage(void);
@@ -265,7 +204,11 @@ enum wsStates {
 };
 wsStates wsState;
 
-
+enum SpeedStates { 
+  SET_MODE,
+  AUTO_MODE
+};
+SpeedStates speedState;
 
 
 enum UltrasonicStates {
@@ -334,14 +277,14 @@ Portenta_H7_Timer ITimer(TIM16);
 
 
 
-
-
 //====================================================
-// m7 setup
+// setup
 //====================================================
 void setup() {
-  // boot m4 core
+
+  // initialize m4 core
   bootM4();
+
   // timer setup
   ITimer.attachInterruptInterval(10, TimerHandler); // is thje timer messing with timeout of the websockets connection??????????
   // debug setup
@@ -366,8 +309,8 @@ void setup() {
 
 
   // stepper setup
-  stepper1.setMaxSpeed(10000.0);
-  stepper1.setAcceleration(750000.0);
+  //stepper1.setMaxSpeed(10000.0);
+  //stepper1.setAcceleration(750000.0);
   // end stepper setup
 
   // relay setup
@@ -380,14 +323,14 @@ void setup() {
 
 }
 //====================================================
-// end m7 setup
+// end setup
 //====================================================
 
 
 
 
 //====================================================
-// m7 main loop
+// main loop
 //====================================================
 void loop() {
 
@@ -395,16 +338,12 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
-  //StepperMachine();
+  StepperSpeedMachine();
   RelayMachine();
 }
 //====================================================
-// end m7 main loop
+// end main loop
 //====================================================
-
-
-
-
 
 
 
@@ -491,7 +430,7 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = analogRead(ULTRASONIC_PIN);
+      ultrasonic_value = (analogRead(ULTRASONIC_PIN) + ultrasonic_value)/2.0;
       ultrasonicDelay = 40;
       UltrasonicState = UT_WAITING;
     break;
@@ -510,6 +449,40 @@ long microsecondsToCentimeters(long microseconds) {
 //====================================================
 // end ultrasonic machine
 //====================================================
+
+//====================================================
+// stepper speed machine
+//====================================================
+void StepperSpeedMachine(void) {
+  switch(speedState) {
+    case SET_MODE:
+      if (speedMode) {
+        Serial.println("Going to auto mode");
+        speedState = AUTO_MODE;
+      }
+
+    break;
+    case AUTO_MODE:
+      if (!speedMode) {
+        Serial.println("Going to set mode");
+        speedState = SET_MODE;
+        stepperSpeed = 0;
+        xfr_ptr->stepperSpeed = stepperSpeed;
+
+      }
+      stepperSpeed = map(ultrasonic_value, 0, 20000, 0, 22000);
+      xfr_ptr->stepperSpeed = stepperSpeed;
+
+    break;
+    default:
+    break;
+  }
+
+}
+//====================================================
+// end stepper speed machine
+//====================================================
+
 
 //====================================================
 // relay machine
@@ -540,7 +513,29 @@ void RelayMachine(void){
 // end relay machine
 //====================================================
 
-
+//====================================================
+// stepper machine
+//====================================================
+//void StepperMachine(void) {
+//  switch(stepperState) {
+//    case STEPPER_STOPPED:
+//      stepper1.stop();
+//    break;
+//    case STEPPER_FORWARD:
+//      stepper1.move(10);
+//    break;
+//    case STEPPER_BACKWARD:
+//      stepper1.move(-10);
+//    break;
+//    default:
+//    break;
+//  }
+//  stepper1.run();
+//
+//}
+//====================================================
+// end stepper machine
+//====================================================
 
 
 
@@ -645,7 +640,9 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 void SendJsonMachine(void) {
   jsonPacket.clear();
   jsonMessage = "";
+  // send back the global var
   jsonPacket["stepper_speed"] = stepperSpeed;
+  // send back the global var
   jsonPacket["stepper_command"] = stepperCommand;
   jsonPacket["ultrasonic_value"] = ultrasonic_value;
   jsonPacket["relay_flag"] = relayFlag;
@@ -666,11 +663,23 @@ void ReceiveJsonMachine(void) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
   }
+
+  speedMode = bool(jsonPacket["stepper_mode"]);
+
+  // get the value from the tablet packet, global var
   stepperSpeed = long(jsonPacket["stepper_speed"]);
-  stepper1.setMaxSpeed(stepperSpeed);
+  // set the value in the shared data for the other core
+  xfr_ptr->stepperSpeed = stepperSpeed;
+
+  //stepper1.setMaxSpeed(stepperSpeed);
+
+  // get the value from the tablet packet, global var
   stepperCommand = int(jsonPacket["stepper_command"]);
+  // set the value in the shared data for the other core
+  xfr_ptr->stepperCommand = stepperCommand;
+
   estop = bool(jsonPacket["relay_flag"]);
-  CommandToEnumState();
+  //CommandToEnumState();
   jsonPacket.clear();
   jsonMessage = "";
 }
@@ -680,120 +689,36 @@ void ReceiveJsonMachine(void) {
 
 
 
-
-//====================================================
-// end program m7 core
-//====================================================
-#endif
-//====================================================
-// end program m7 core
-//====================================================
-
-
-
-
-
-
 //====================================================
 // stepper command string to enum state
 //====================================================
-void CommandToEnumState(void) {
-  Serial.println("Got command: ");
-  Serial.println(stepperCommand);
-  switch(stepperCommand) {
-      case 0:
-        stepperState = STEPPER_STOPPED;
-      break;
-      case 1:
-        stepperState = STEPPER_FORWARD;
-      break;
-      case 2:
-        stepperState = STEPPER_BACKWARD;
-      break;
-      default:
-      break;
-    }
-  }
-//====================================================
+//void CommandToEnumState(void) {
+//  Serial.println("Got command: ");
+//  Serial.println(stepperCommand);
+//  switch(stepperCommand) {
+//      case 0:
+//        stepperState = STEPPER_STOPPED;
+//        xfr_ptr->stepperCommand = 0;
+//      break;
+//      case 1:
+//        stepperState = STEPPER_FORWARD;
+//        xfr_ptr->stepperCommand = 1;
+//
+//      break;
+//      case 2:
+//        stepperState = STEPPER_BACKWARD;
+//        xfr_ptr->stepperCommand = 2;
+//
+//      break;
+//      default:
+//      break;
+//    }
+//  }
+////====================================================
 // end stepper command string to enum state
 //====================================================
 
 
 //====================================================
 // end functions
-//====================================================
-
-
-
-
-
-
-//====================================================
-// program m4 core
-//====================================================
-#ifdef CORE_CM4
-//====================================================
-// program m4 core
-//====================================================
-
-
-//====================================================
-// m4 setup
-//====================================================
-void setup() {
- 
-  stepper1.setMaxSpeed(10000.0);
-  stepper1.setAcceleration(750000.0);
-
-}
-//====================================================
-// end m4 setup
-//====================================================
-
-
-
-
-//====================================================
-// m4 main loop
-//====================================================
-void loop() {
-  StepperMachine();
-}
-//====================================================
-// end m4 main loop
-//====================================================
-
-
-//====================================================
-// stepper machine
-//====================================================
-void StepperMachine(void) {
-  switch(stepperState) {
-    case STEPPER_STOPPED:
-      stepper1.stop();
-    break;
-    case STEPPER_FORWARD:
-      stepper1.move(10);
-    break;
-    case STEPPER_BACKWARD:
-      stepper1.move(-10);
-    break;
-    default:
-    break;
-  }
-  stepper1.run();
-
-}
-//====================================================
-// end stepper machine
-//====================================================
-
-
-
-//====================================================
-// end program m4 core
-//====================================================
-#endif
-//====================================================
-// end program m4 core
 //====================================================

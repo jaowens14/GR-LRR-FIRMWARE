@@ -11,7 +11,17 @@
 //====================================================
 
 
-
+//====================================================
+// shared data
+//====================================================
+struct shared_data {
+  long stepperSpeed = 0; // buffer
+  int stepperCommand = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+};
+volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
+//====================================================
+// end shared data
+//====================================================
 
 //====================================================
 // included libraries
@@ -57,11 +67,11 @@ volatile int wsDelay = 0;
 //====================================================
 // stepper definitions
 //====================================================
-#include <AccelStepper.h>
-#define STEPPER_STEP_PIN 4
-#define STEPPER_DIRECTION_PIN 5
-AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-int stepper1Position = 0;
+//#include <AccelStepper.h>
+//#define STEPPER_STEP_PIN 4
+//#define STEPPER_DIRECTION_PIN 5
+//AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
+//int stepper1Position = 0;
 int stepperCommand = 0;
 long stepperSpeed = 0;
 //====================================================
@@ -160,7 +170,7 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
 void RelayMachine(void);
-void StepperMachine(void);
+//void StepperMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
@@ -193,12 +203,12 @@ enum wsStates {
 };
 wsStates wsState;
 
-enum StepperStates { 
-  STEPPER_STOPPED,
-  STEPPER_FORWARD,
-  STEPPER_BACKWARD
-};
-StepperStates stepperState;
+//enum StepperStates { 
+//  STEPPER_STOPPED,
+//  STEPPER_FORWARD,
+//  STEPPER_BACKWARD
+//};
+//StepperStates stepperState;
 
 
 enum UltrasonicStates {
@@ -271,6 +281,10 @@ Portenta_H7_Timer ITimer(TIM16);
 // setup
 //====================================================
 void setup() {
+
+  // initialize m4 core
+  bootM4();
+
   // timer setup
   ITimer.attachInterruptInterval(10, TimerHandler); // is thje timer messing with timeout of the websockets connection??????????
   // debug setup
@@ -295,8 +309,8 @@ void setup() {
 
 
   // stepper setup
-  stepper1.setMaxSpeed(10000.0);
-  stepper1.setAcceleration(750000.0);
+  //stepper1.setMaxSpeed(10000.0);
+  //stepper1.setAcceleration(750000.0);
   // end stepper setup
 
   // relay setup
@@ -324,7 +338,7 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
-  StepperMachine();
+  //StepperMachine();
   RelayMachine();
 }
 //====================================================
@@ -468,23 +482,23 @@ void RelayMachine(void){
 //====================================================
 // stepper machine
 //====================================================
-void StepperMachine(void) {
-  switch(stepperState) {
-    case STEPPER_STOPPED:
-      stepper1.stop();
-    break;
-    case STEPPER_FORWARD:
-      stepper1.move(10);
-    break;
-    case STEPPER_BACKWARD:
-      stepper1.move(-10);
-    break;
-    default:
-    break;
-  }
-  stepper1.run();
-
-}
+//void StepperMachine(void) {
+//  switch(stepperState) {
+//    case STEPPER_STOPPED:
+//      stepper1.stop();
+//    break;
+//    case STEPPER_FORWARD:
+//      stepper1.move(10);
+//    break;
+//    case STEPPER_BACKWARD:
+//      stepper1.move(-10);
+//    break;
+//    default:
+//    break;
+//  }
+//  stepper1.run();
+//
+//}
 //====================================================
 // end stepper machine
 //====================================================
@@ -592,7 +606,9 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 void SendJsonMachine(void) {
   jsonPacket.clear();
   jsonMessage = "";
+  // send back the global var
   jsonPacket["stepper_speed"] = stepperSpeed;
+  // send back the global var
   jsonPacket["stepper_command"] = stepperCommand;
   jsonPacket["ultrasonic_value"] = ultrasonic_value;
   jsonPacket["relay_flag"] = relayFlag;
@@ -613,11 +629,20 @@ void ReceiveJsonMachine(void) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
   }
+  // get the value from the tablet packet, global var
   stepperSpeed = long(jsonPacket["stepper_speed"]);
-  stepper1.setMaxSpeed(stepperSpeed);
+  // set the value in the shared data for the other core
+  xfr_ptr->stepperSpeed = stepperSpeed;
+
+  //stepper1.setMaxSpeed(stepperSpeed);
+
+  // get the value from the tablet packet, global var
   stepperCommand = int(jsonPacket["stepper_command"]);
+  // set the value in the shared data for the other core
+  xfr_ptr->stepperCommand = stepperCommand;
+
   estop = bool(jsonPacket["relay_flag"]);
-  CommandToEnumState();
+  //CommandToEnumState();
   jsonPacket.clear();
   jsonMessage = "";
 }
@@ -630,24 +655,29 @@ void ReceiveJsonMachine(void) {
 //====================================================
 // stepper command string to enum state
 //====================================================
-void CommandToEnumState(void) {
-  Serial.println("Got command: ");
-  Serial.println(stepperCommand);
-  switch(stepperCommand) {
-      case 0:
-        stepperState = STEPPER_STOPPED;
-      break;
-      case 1:
-        stepperState = STEPPER_FORWARD;
-      break;
-      case 2:
-        stepperState = STEPPER_BACKWARD;
-      break;
-      default:
-      break;
-    }
-  }
-//====================================================
+//void CommandToEnumState(void) {
+//  Serial.println("Got command: ");
+//  Serial.println(stepperCommand);
+//  switch(stepperCommand) {
+//      case 0:
+//        stepperState = STEPPER_STOPPED;
+//        xfr_ptr->stepperCommand = 0;
+//      break;
+//      case 1:
+//        stepperState = STEPPER_FORWARD;
+//        xfr_ptr->stepperCommand = 1;
+//
+//      break;
+//      case 2:
+//        stepperState = STEPPER_BACKWARD;
+//        xfr_ptr->stepperCommand = 2;
+//
+//      break;
+//      default:
+//      break;
+//    }
+//  }
+////====================================================
 // end stepper command string to enum state
 //====================================================
 
