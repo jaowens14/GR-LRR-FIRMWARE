@@ -73,6 +73,7 @@ volatile int wsDelay = 0;
 //AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
 //int stepper1Position = 0;
 int stepperCommand = 0;
+int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 //====================================================
 // end stepper definitions
@@ -85,7 +86,7 @@ long stepperSpeed = 0;
 //====================================================
 // ultrasonic definitions
 //====================================================
-#define ULTRASONIC_PIN A6
+#define ULTRASONIC_PIN A0
 long duration = 0; 
 long distance = 0;
 long ultrasonic_value = 0;
@@ -117,7 +118,7 @@ volatile int blueLedDelay = 0;
 //====================================================
 // relay definitions
 //====================================================
-#define RELAY_PIN 2
+#define RELAY_PIN 1
 bool relayFlag = false;
 volatile int relayDelay = 0;
 bool estop = false;
@@ -170,7 +171,7 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
 void RelayMachine(void);
-//void StepperMachine(void);
+void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
@@ -203,12 +204,11 @@ enum wsStates {
 };
 wsStates wsState;
 
-//enum StepperStates { 
-//  STEPPER_STOPPED,
-//  STEPPER_FORWARD,
-//  STEPPER_BACKWARD
-//};
-//StepperStates stepperState;
+enum SpeedStates { 
+  SET_MODE,
+  AUTO_MODE
+};
+SpeedStates speedState;
 
 
 enum UltrasonicStates {
@@ -338,7 +338,7 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
-  //StepperMachine();
+  StepperSpeedMachine();
   RelayMachine();
 }
 //====================================================
@@ -430,7 +430,7 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = analogRead(ULTRASONIC_PIN);
+      ultrasonic_value = (analogRead(ULTRASONIC_PIN) + ultrasonic_value)/2.0;
       ultrasonicDelay = 40;
       UltrasonicState = UT_WAITING;
     break;
@@ -449,6 +449,40 @@ long microsecondsToCentimeters(long microseconds) {
 //====================================================
 // end ultrasonic machine
 //====================================================
+
+//====================================================
+// stepper speed machine
+//====================================================
+void StepperSpeedMachine(void) {
+  switch(speedState) {
+    case SET_MODE:
+      if (speedMode) {
+        Serial.println("Going to auto mode");
+        speedState = AUTO_MODE;
+      }
+
+    break;
+    case AUTO_MODE:
+      if (!speedMode) {
+        Serial.println("Going to set mode");
+        speedState = SET_MODE;
+        stepperSpeed = 0;
+        xfr_ptr->stepperSpeed = stepperSpeed;
+
+      }
+      stepperSpeed = map(ultrasonic_value, 0, 20000, 0, 22000);
+      xfr_ptr->stepperSpeed = stepperSpeed;
+
+    break;
+    default:
+    break;
+  }
+
+}
+//====================================================
+// end stepper speed machine
+//====================================================
+
 
 //====================================================
 // relay machine
@@ -629,6 +663,9 @@ void ReceiveJsonMachine(void) {
     Serial.print(F("deserializeJson() failed: "));
     Serial.println(error.f_str());
   }
+
+  speedMode = bool(jsonPacket["stepper_mode"]);
+
   // get the value from the tablet packet, global var
   stepperSpeed = long(jsonPacket["stepper_speed"]);
   // set the value in the shared data for the other core

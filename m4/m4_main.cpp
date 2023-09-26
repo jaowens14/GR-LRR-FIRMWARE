@@ -45,10 +45,15 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 // stepper definitions
 //====================================================
 #include <AccelStepper.h>
-#define STEPPER_STEP_PIN 4
-#define STEPPER_DIRECTION_PIN 5
-AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-int stepper1Position = 0;
+
+#define STEPPER1_STEP_PIN 5
+#define STEPPER1_DIRECTION_PIN 4
+AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER1_STEP_PIN, STEPPER1_DIRECTION_PIN);
+
+#define STEPPER2_STEP_PIN 3
+#define STEPPER2_DIRECTION_PIN 2
+AccelStepper stepper2(AccelStepper::FULL2WIRE, STEPPER2_STEP_PIN, STEPPER2_DIRECTION_PIN);
+
 int stepperCommand = 0;
 long stepperSpeed = 0;
 
@@ -160,6 +165,9 @@ void setup() {
   // stepper setup
   stepper1.setMaxSpeed(10000000.0);
   stepper1.setAcceleration(750000.0);
+
+  stepper2.setMaxSpeed(10000000.0);
+  stepper2.setAcceleration(750000.0);
   // end stepper setup
 }
 //====================================================
@@ -198,14 +206,22 @@ void StepperMachine(void) {
   switch(stepperCommand) {
     case 0:
       stepper1.stop();
+      stepper2.stop();
+
     break;
     case 1:
-      stepper1.setSpeed(stepperSpeed);
+      stepper1.setSpeed(-stepperSpeed);
+      stepper2.setSpeed(stepperSpeed);
+
       stepper1.runSpeed();
+      stepper2.runSpeed();
     break;
     case 2:
-      stepper1.setSpeed(-stepperSpeed);
+      stepper1.setSpeed(stepperSpeed);
+      stepper2.setSpeed(-stepperSpeed);
       stepper1.runSpeed();
+      stepper2.runSpeed();
+
     break;
     default:
     break;

@@ -86,16 +86,47 @@ long stepperSpeed = 0;
 //====================================================
 // ultrasonic definitions
 //====================================================
-#define ULTRASONIC_PIN A6
+#define ULTRASONIC_PIN A0
 long duration = 0; 
 long distance = 0;
 long ultrasonic_value = 0;
 volatile int ultrasonicDelay = 0;
 bool ultrasonicFlag = 0;
 long current_time = 0;
+long ave_ultrasonic_value = 0;
+
+const int numSamples = 16;
+long samples[numSamples] = {0};
+int sampleNumber = 0;
+
 //====================================================
 // end ultrasonic definitions
 //====================================================
+
+
+//====================================================
+// pid definitions
+//====================================================
+
+long kp = 0.1;
+long ki = 0.1;
+long kd = 0.1;
+long current_sensor_value = 0;
+long current_pid_error = 0;
+long last_pid_error = 0;
+long target_sensor_value = 8000;
+long integral = 0;
+long derivative = 0;
+long pid_speed = 0;
+
+
+// speed is limited to between 0 and 10k
+
+//====================================================
+// end pid definitions
+//====================================================
+
+
 
 
 //====================================================
@@ -118,7 +149,7 @@ volatile int blueLedDelay = 0;
 //====================================================
 // relay definitions
 //====================================================
-#define RELAY_PIN 2
+#define RELAY_PIN 1
 bool relayFlag = false;
 volatile int relayDelay = 0;
 bool estop = false;
@@ -430,7 +461,20 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = (analogRead(ULTRASONIC_PIN) + ultrasonic_value)/2.0;
+      ultrasonic_value = analogRead(ULTRASONIC_PIN);
+      samples[sampleNumber++] = ultrasonic_value;
+
+      if (sampleNumber >= numSamples) {sampleNumber = 0;}
+
+      ave_ultrasonic_value = 0;
+
+      for(int i=0; i< numSamples; ++i){ave_ultrasonic_value += samples[i];}
+
+      ave_ultrasonic_value /= numSamples;
+
+      if (ave_ultrasonic_value >= 10000.0) ave_ultrasonic_value = 10000.0;
+      else if (ave_ultrasonic_value <= 0.0) ave_ultrasonic_value = 0;
+
       ultrasonicDelay = 40;
       UltrasonicState = UT_WAITING;
     break;
@@ -439,6 +483,11 @@ void UltrasonicMachine() {
   }
 
 }
+
+
+
+
+
 
 long microsecondsToCentimeters(long microseconds) {
   // The speed of sound is 340 m/s or 29 microseconds per centimeter.
@@ -449,6 +498,42 @@ long microsecondsToCentimeters(long microseconds) {
 //====================================================
 // end ultrasonic machine
 //====================================================
+
+
+
+//====================================================
+// ultrasonic machine
+//====================================================
+void UT2SPEED_PID() {
+
+  current_sensor_value = ultrasonic_value;
+
+  current_pid_error = target_sensor_value - current_sensor_value;
+
+  integral = integral + current_pid_error;
+
+  derivative = current_pid_error - last_pid_error;
+
+  pid_speed = (kp * current_pid_error) + (ki * integral) + (kd * derivative);
+
+  if (pid_speed > 10000.0) pid_speed = 10000.0;
+  else if (pid_speed < 0) pid_speed = 0.0;
+
+  last_pid_error = current_pid_error;
+
+  stepperSpeed = pid_speed;
+  
+
+
+
+}
+
+
+//====================================================
+// end ultrasonic machine
+//====================================================
+
+
 
 //====================================================
 // stepper speed machine
@@ -470,7 +555,8 @@ void StepperSpeedMachine(void) {
         xfr_ptr->stepperSpeed = stepperSpeed;
 
       }
-      stepperSpeed = map(ultrasonic_value, 0, 20000, 0, 22000);
+      // call PID stuff here
+      stepperSpeed = map(ave_ultrasonic_value, 0, 10000, 10000, 0);
       xfr_ptr->stepperSpeed = stepperSpeed;
 
     break;
@@ -618,8 +704,8 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    //Serial.println("Got a Ping!");
-    Serial.println(ultrasonic_value);
+    Serial.println("UT value sent!");
+    Serial.println(ave_ultrasonic_value);
     SendJsonMachine();
     wsClient.send(jsonMessage);
 
@@ -644,7 +730,7 @@ void SendJsonMachine(void) {
   jsonPacket["stepper_speed"] = stepperSpeed;
   // send back the global var
   jsonPacket["stepper_command"] = stepperCommand;
-  jsonPacket["ultrasonic_value"] = ultrasonic_value;
+  jsonPacket["ultrasonic_value"] = ave_ultrasonic_value;
   jsonPacket["relay_flag"] = relayFlag;
   serializeJson(jsonPacket, jsonMessage);
 }
