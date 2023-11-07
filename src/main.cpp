@@ -47,16 +47,16 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "192.168.3.1"
-const char* ssid = "GR-LRR_POC"; //Enter SSID
-const char* password = "GR-LRR_POC"; //Enter Password
+#define WEBSOCKETS_HOST     "10.42.0.135"
+const char* ssid = "grlrr2023"; //Enter SSID
+const char* password = "grlrr2023"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
 uint64_t now                    = 0;
 bool wsConnected = false;
 bool wsFlag = 0;
-volatile int wsDelay = 0;
+volatile int wsReconnectDelay = 0;
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -93,40 +93,9 @@ long ultrasonic_value = 0;
 volatile int ultrasonicDelay = 0;
 bool ultrasonicFlag = 0;
 long current_time = 0;
-long ave_ultrasonic_value = 0;
-
-const int numSamples = 16;
-long samples[numSamples] = {0};
-int sampleNumber = 0;
-
 //====================================================
 // end ultrasonic definitions
 //====================================================
-
-
-//====================================================
-// pid definitions
-//====================================================
-
-long kp = 0.1;
-long ki = 0.1;
-long kd = 0.1;
-long current_sensor_value = 0;
-long current_pid_error = 0;
-long last_pid_error = 0;
-long target_sensor_value = 8000;
-long integral = 0;
-long derivative = 0;
-long pid_speed = 0;
-
-
-// speed is limited to between 0 and 10k
-
-//====================================================
-// end pid definitions
-//====================================================
-
-
 
 
 //====================================================
@@ -179,11 +148,11 @@ String jsonMessage = "";
 // ip address definitions
 //====================================================
 // Since the esp is also on its own network... it has a local ip that isn't used for anything. 
-IPAddress local(192, 168, 3, 1);
+IPAddress local(10, 42, 0, 100);
 // throwing googles dns in for a temp fix
 IPAddress testdns(8,8,8,8); 
 // Since we are serving as an access point this is the address where the websockets will be posted
-IPAddress gateway(192, 168, 3, 1);
+IPAddress gateway(10, 42, 0, 1);
 // These are set to the same just for ease of use. 
 IPAddress nmask(255, 255, 255, 0);
 //====================================================
@@ -289,7 +258,7 @@ void TimerHandler() {
     // every 1/10 second
   if ((interruptCounter % 10000) == 0) {
     if (redLedDelay) redLedDelay--;
-    if (wsDelay) wsDelay--;
+    if (wsReconnectDelay) wsReconnectDelay--;
     if (relayDelay) relayDelay--;
   }
 
@@ -323,9 +292,11 @@ void setup() {
 
   // wifi setup
   while (!Serial && millis() < 2000);
-  WiFi.config(local, testdns, gateway, nmask);
+  WiFi.begin(ssid, password);
+
   delay(500);
-  WiFi.beginAP(ssid, password);
+  WiFi.config(local, testdns, gateway, nmask);
+
   while (WiFi.status() != WL_CONNECTED && millis() < 5000);
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
@@ -393,7 +364,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        Serial.println(String(millis()/1000.0));
+        Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     case LED_ON:
@@ -402,7 +373,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        Serial.println(String(millis()/1000.0));
+        Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     default:
@@ -461,20 +432,7 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = analogRead(ULTRASONIC_PIN);
-      samples[sampleNumber++] = ultrasonic_value;
-
-      if (sampleNumber >= numSamples) {sampleNumber = 0;}
-
-      ave_ultrasonic_value = 0;
-
-      for(int i=0; i< numSamples; ++i){ave_ultrasonic_value += samples[i];}
-
-      ave_ultrasonic_value /= numSamples;
-
-      if (ave_ultrasonic_value >= 10000.0) ave_ultrasonic_value = 10000.0;
-      else if (ave_ultrasonic_value <= 0.0) ave_ultrasonic_value = 0;
-
+      ultrasonic_value = (analogRead(ULTRASONIC_PIN) + ultrasonic_value)/2.0;
       ultrasonicDelay = 40;
       UltrasonicState = UT_WAITING;
     break;
@@ -483,11 +441,6 @@ void UltrasonicMachine() {
   }
 
 }
-
-
-
-
-
 
 long microsecondsToCentimeters(long microseconds) {
   // The speed of sound is 340 m/s or 29 microseconds per centimeter.
@@ -498,42 +451,6 @@ long microsecondsToCentimeters(long microseconds) {
 //====================================================
 // end ultrasonic machine
 //====================================================
-
-
-
-//====================================================
-// ultrasonic machine
-//====================================================
-void UT2SPEED_PID() {
-
-  current_sensor_value = ultrasonic_value;
-
-  current_pid_error = target_sensor_value - current_sensor_value;
-
-  integral = integral + current_pid_error;
-
-  derivative = current_pid_error - last_pid_error;
-
-  pid_speed = (kp * current_pid_error) + (ki * integral) + (kd * derivative);
-
-  if (pid_speed > 10000.0) pid_speed = 10000.0;
-  else if (pid_speed < 0) pid_speed = 0.0;
-
-  last_pid_error = current_pid_error;
-
-  stepperSpeed = pid_speed;
-  
-
-
-
-}
-
-
-//====================================================
-// end ultrasonic machine
-//====================================================
-
-
 
 //====================================================
 // stepper speed machine
@@ -555,8 +472,7 @@ void StepperSpeedMachine(void) {
         xfr_ptr->stepperSpeed = stepperSpeed;
 
       }
-      // call PID stuff here
-      stepperSpeed = map(ave_ultrasonic_value, 0, 10000, 10000, 0);
+      stepperSpeed = map(ultrasonic_value, 0, 20000, 0, 22000);
       xfr_ptr->stepperSpeed = stepperSpeed;
 
     break;
@@ -631,56 +547,52 @@ void RelayMachine(void){
 //====================================================
 void WebSocketMachine() {
 
-  wsConnected = wsClient.available();
-  checkToSendMessage();
-  
-  // let the websockets client check for incoming messages
-  if (wsClient.available()) {
+// the websocket machine here has two states
+// it can be connected or not
+// if connected it needs to send and receive messages
+// if not connected it needs to tell us and try to get connected
+  switch(wsState){
+    case WS_DISCONNECTED:
+      if (!wsReconnectDelay) {
 
-    wsClient.poll();
-    now = millis();
+        wsClient = wsServer.accept();
+        wsConnected = wsClient.available();
 
-    // Send heartbeat in order to avoid disconnections during ISP resetting IPs over night. Thanks @MacSass
-    if ((now - heartbeatTimestamp) > HEARTBEAT_INTERVAL) {
-      heartbeatTimestamp = now;
-      wsClient.send("H");
-    }
+        if (wsConnected){
+          // register callback when messages are received
+          wsClient.onMessage(onMessageCallback);
+          // register callback when events are occuring
+          wsClient.onEvent(onEventsCallback);
+          // change state to connected
+          wsState = WS_CONNECTED;
+
+          Serial.println("Connected!");
+          digitalWrite(GREEN_LED, LOW);
+          digitalWrite(RED_LED, HIGH);
+
+        }
+        wsReconnectDelay = 10;
+      }
+    break;
+    case WS_CONNECTED:
+      if (!wsClient.available()) {
+        wsState = WS_DISCONNECTED;
+        Serial.println("Disconnected!");
+        digitalWrite(GREEN_LED, HIGH);
+        digitalWrite(RED_LED, LOW);
+      }
+      wsClient.poll();
+
+    break;
+    default:
+    break;
   }
+
 
 }
 
-void checkToSendMessage() {
-  #define REPEAT_INTERVAL    1000L
-  static unsigned long checkstatus_timeout = 1000;
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout) {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
-}
 
-void sendMessage() {
-  // try to connect to Websockets server
-  if (!wsConnected) {
-    wsClient = wsServer.accept();
-    wsConnected = wsClient.available();
-    // run callback when messages are received
-    wsClient.onMessage(onMessageCallback);
-    // run callback when events are occuring
-    wsClient.onEvent(onEventsCallback);
-  }
-  
-  if (wsConnected) {
-    Serial.println("Connected!");
-    digitalWrite(GREEN_LED, LOW);
-  } 
 
-  else {
-    digitalWrite(GREEN_LED, HIGH);
-    Serial.println("Not Connected!");
-    //Serial.println(wsConnected);
-  }
-}
 
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Got Message: ");
@@ -704,8 +616,8 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    Serial.println("UT value sent!");
-    Serial.println(ave_ultrasonic_value);
+    //Serial.println("Got a Ping!");
+    Serial.println(ultrasonic_value);
     SendJsonMachine();
     wsClient.send(jsonMessage);
 
@@ -730,7 +642,7 @@ void SendJsonMachine(void) {
   jsonPacket["stepper_speed"] = stepperSpeed;
   // send back the global var
   jsonPacket["stepper_command"] = stepperCommand;
-  jsonPacket["ultrasonic_value"] = ave_ultrasonic_value;
+  jsonPacket["ultrasonic_value"] = ultrasonic_value;
   jsonPacket["relay_flag"] = relayFlag;
   serializeJson(jsonPacket, jsonMessage);
 }

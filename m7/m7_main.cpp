@@ -47,9 +47,9 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "192.168.3.1"
-const char* ssid = "GR-LRR_POC"; //Enter SSID
-const char* password = "GR-LRR_POC"; //Enter Password
+#define WEBSOCKETS_HOST     "192.168.0.100"
+const char* ssid = "vestas"; //Enter SSID
+const char* password = "vestas"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
