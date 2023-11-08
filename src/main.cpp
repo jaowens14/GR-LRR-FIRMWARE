@@ -57,6 +57,10 @@ uint64_t now                    = 0;
 bool wsConnected = false;
 bool wsFlag = 0;
 volatile int wsReconnectDelay = 0;
+volatile int wsDelay = 0;
+
+byte mac[6];
+
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -148,7 +152,7 @@ String jsonMessage = "";
 // ip address definitions
 //====================================================
 // Since the esp is also on its own network... it has a local ip that isn't used for anything. 
-IPAddress local(10, 42, 0, 100);
+IPAddress local(10, 42, 0, 135);
 // throwing googles dns in for a temp fix
 IPAddress testdns(8,8,8,8); 
 // Since we are serving as an access point this is the address where the websockets will be posted
@@ -260,6 +264,7 @@ void TimerHandler() {
     if (redLedDelay) redLedDelay--;
     if (wsReconnectDelay) wsReconnectDelay--;
     if (relayDelay) relayDelay--;
+    if (wsDelay) wsDelay--;
   }
 
   // every second
@@ -281,6 +286,7 @@ Portenta_H7_Timer ITimer(TIM16);
 // setup
 //====================================================
 void setup() {
+  digitalWrite(RED_LED, LOW);
 
   // initialize m4 core
   bootM4();
@@ -292,15 +298,43 @@ void setup() {
 
   // wifi setup
   while (!Serial && millis() < 2000);
+
+  
+
   WiFi.begin(ssid, password);
 
   delay(500);
   WiFi.config(local, testdns, gateway, nmask);
+  delay(500);
 
-  while (WiFi.status() != WL_CONNECTED && millis() < 5000);
+  while (WiFi.status() != WL_CONNECTED){
+    delay(1000);
+    WiFi.begin(ssid, password);
+    delay(1000);
+    WiFi.config(local, testdns, gateway, nmask);
+    delay(1000);
+    Serial.println("trying to connect");
+  }
+  digitalWrite(RED_LED, HIGH);
+
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+  Serial.println("Mac address: ");
+  
+  WiFi.macAddress(mac);
+
+  Serial.print(mac[5],HEX);
+  Serial.print(":");
+  Serial.print(mac[4],HEX);
+  Serial.print(":");
+  Serial.print(mac[3],HEX);
+  Serial.print(":");
+  Serial.print(mac[2],HEX);
+  Serial.print(":");
+  Serial.print(mac[1],HEX);
+  Serial.print(":");
+  Serial.println(mac[0],HEX);
   // end wifi setup
 
 
@@ -364,7 +398,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        Serial.println(String(millis()/1000.0/60.0));
+        //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     case LED_ON:
@@ -373,7 +407,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        Serial.println(String(millis()/1000.0/60.0));
+        //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     default:
@@ -554,15 +588,19 @@ void WebSocketMachine() {
   switch(wsState){
     case WS_DISCONNECTED:
       if (!wsReconnectDelay) {
-
+        Serial.println("accepting new");
+        delay(1000);
+        wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
 
         if (wsConnected){
           // register callback when messages are received
           wsClient.onMessage(onMessageCallback);
-          // register callback when events are occuring
+          // register callback when events are occuring          
           wsClient.onEvent(onEventsCallback);
+          // 
+
           // change state to connected
           wsState = WS_CONNECTED;
 
@@ -581,6 +619,14 @@ void WebSocketMachine() {
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(RED_LED, LOW);
       }
+
+      if (!wsDelay && wsClient.available()) {
+        //Serial.println("Sent");
+        
+        //wsClient.send(jsonMessage);
+        //wsDelay = 5;
+      }
+      
       wsClient.poll();
 
     break;
@@ -595,8 +641,8 @@ void WebSocketMachine() {
 
 
 void onMessageCallback(WebsocketsMessage message) {
-    Serial.print("Got Message: ");
-    Serial.println(message.data());
+    //Serial.print("Got Message: ");
+    //Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
     ReceiveJsonMachine();
@@ -610,6 +656,7 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println(String(millis()/1000.0/60.0));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
     delay(2000);
@@ -617,14 +664,16 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 
   else if (event == WebsocketsEvent::GotPing) {
     //Serial.println("Got a Ping!");
-    Serial.println(ultrasonic_value);
+    //Serial.println(ultrasonic_value);
     SendJsonMachine();
     wsClient.send(jsonMessage);
 
   }
 
   else if (event == WebsocketsEvent::GotPong) {
-    Serial.println("Got a Pong!");
+    //Serial.println("Got a Pong!");
+    //SendJsonMachine();
+    //wsClient.send(jsonMessage);
   }
 }
 //====================================================
