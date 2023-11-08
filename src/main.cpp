@@ -609,7 +609,7 @@ void WebSocketMachine() {
           digitalWrite(RED_LED, HIGH);
 
         }
-        wsReconnectDelay = 10;
+        wsReconnectDelay = 5;
       }
     break;
     case WS_CONNECTED:
@@ -621,10 +621,10 @@ void WebSocketMachine() {
       }
 
       if (!wsDelay && wsClient.available()) {
-        //Serial.println("Sent");
-        
-        //wsClient.send(jsonMessage);
-        //wsDelay = 5;
+        Serial.println("Sent");
+        wsClient.ping();    
+
+        wsDelay = 5;
       }
       
       wsClient.poll();
@@ -659,7 +659,7 @@ void onEventsCallback(WebsocketsEvent event, String data) {
     Serial.println(String(millis()/1000.0/60.0));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
-    delay(2000);
+    //delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
