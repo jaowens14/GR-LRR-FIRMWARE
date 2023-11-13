@@ -47,7 +47,10 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "10.42.0.109"
+
+const uint16_t websockets_server_port = WEBSOCKETS_PORT;
+const char* websockets_server_host = "10.42.0.109";
+
 const char* ssid = "grlrr2024"; //Enter SSID
 const char* password = "grlrr2024"; //Enter Password
 using namespace websockets2_generic;
@@ -339,7 +342,7 @@ void setup() {
 
 
   // websocket setup
-  wsServer.listen(WEBSOCKETS_PORT);
+  wsServer.listen(websockets_server_port);
   Serial.println("websocket server listening...");
   // end websocket setup
 
@@ -621,7 +624,7 @@ void WebSocketMachine() {
       }
 
       if (!wsDelay && wsClient.available()) {
-        Serial.println("Sent");
+        Serial.println("Sent ping");
         wsClient.ping();    
 
         wsDelay = 5;
@@ -656,24 +659,26 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println(String(millis()/1000.0/60.0));
+    Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
     //delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    //Serial.println("Got a Ping!");
-    //Serial.println(ultrasonic_value);
-    SendJsonMachine();
-    wsClient.send(jsonMessage);
+    Serial.println("Got a Ping!");
+    Serial.println(ultrasonic_value);
+    //SendJsonMachine();
+    //wsClient.send(jsonMessage);
 
   }
 
   else if (event == WebsocketsEvent::GotPong) {
-    //Serial.println("Got a Pong!");
+    Serial.println("Got a Pong!");
     //SendJsonMachine();
-    //wsClient.send(jsonMessage);
+    
+    //wsClient.sendBinary("101");
+
   }
 }
 //====================================================
