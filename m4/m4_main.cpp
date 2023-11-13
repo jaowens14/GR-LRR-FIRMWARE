@@ -44,15 +44,20 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // stepper definitions
 //====================================================
-#include <AccelStepper.h>
+#include <SPI.h>
+#include <HighPowerStepperDriver.h>
+#include <ContinuousStepper.h>
 
-#define STEPPER1_STEP_PIN 5
-#define STEPPER1_DIRECTION_PIN 4
-AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER1_STEP_PIN, STEPPER1_DIRECTION_PIN);
 
-#define STEPPER2_STEP_PIN 3
-#define STEPPER2_DIRECTION_PIN 2
-AccelStepper stepper2(AccelStepper::FULL2WIRE, STEPPER2_STEP_PIN, STEPPER2_DIRECTION_PIN);
+const uint8_t Step1Pin = D6;
+const uint8_t Step2Pin = D12;
+
+const uint8_t CSPin = D7;
+const uint8_t DirPin = D7;
+
+HighPowerStepperDriver sd;
+ContinuousStepper<StepperDriver> stepper1;
+ContinuousStepper<StepperDriver> stepper2;
 
 int stepperCommand = 0;
 long stepperSpeed = 0;
@@ -162,13 +167,47 @@ StepperStates stepperState;
 // setup
 //====================================================
 void setup() {
-  // stepper setup
-  stepper1.setMaxSpeed(10000000.0);
-  stepper1.setAcceleration(750000.0);
+  SPI.begin();
+  sd.setChipSelectPin(CSPin);
 
-  stepper2.setMaxSpeed(10000000.0);
-  stepper2.setAcceleration(750000.0);
+  // Give the driver some time to power up.
+  delay(10);
+
+  // Reset the driver to its default settings and clear latched status
+  // conditions.
+  sd.resetSettings();
+  sd.clearStatus();
+
+  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+  // for most applications, and we find that it usually works well.
+  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+
+  // Set the current limit. You should change the number here to an appropriate
+  // value for your particular system.
+  sd.setCurrentMilliamps36v4(1000);
+
+  // Set the number of microsteps that correspond to one full step.
+  sd.setStepMode(HPSDStepMode::MicroStep4);
+
+  // Enable the motor outputs.
+  sd.enableDriver();
+
+  // change the pin to use it for motion
+  // Drive the STEP and DIR pins low initially.
+  pinMode(Step1Pin, OUTPUT);
+  digitalWrite(Step1Pin, LOW);
+  pinMode(Step2Pin, OUTPUT);
+  digitalWrite(Step2Pin, LOW);
+  pinMode(DirPin, OUTPUT);
+  digitalWrite(DirPin, LOW);
+
+  stepper1.begin(Step1Pin, DirPin);
+  stepper2.begin(Step2Pin, DirPin);
+
+  stepper1.setAcceleration(6400); 
+  stepper2.setAcceleration(6400); 
   // end stepper setup
+
 }
 //====================================================
 // end setup
@@ -203,6 +242,10 @@ void loop() {
 void StepperMachine(void) {
   stepperSpeed = xfr_ptr->stepperSpeed;
   stepperCommand = xfr_ptr->stepperCommand;
+
+  stepper1.loop();
+  stepper2.loop();
+
   switch(stepperCommand) {
     case 0:
       stepper1.stop();
@@ -210,17 +253,13 @@ void StepperMachine(void) {
 
     break;
     case 1:
-      stepper1.setSpeed(-stepperSpeed);
-      stepper2.setSpeed(stepperSpeed);
+      stepper1.spin(stepperSpeed);
+      stepper2.spin(stepperSpeed);
 
-      stepper1.runSpeed();
-      stepper2.runSpeed();
     break;
     case 2:
-      stepper1.setSpeed(stepperSpeed);
-      stepper2.setSpeed(-stepperSpeed);
-      stepper1.runSpeed();
-      stepper2.runSpeed();
+      stepper1.spin(-stepperSpeed);
+      stepper2.spin(-stepperSpeed);
 
     break;
     default:

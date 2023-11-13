@@ -47,16 +47,20 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "192.168.0.100"
-const char* ssid = "vestas"; //Enter SSID
-const char* password = "vestas"; //Enter Password
+#define WEBSOCKETS_HOST     "10.42.0.109"
+const char* ssid = "grlrr2024"; //Enter SSID
+const char* password = "grlrr2024"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
 uint64_t now                    = 0;
 bool wsConnected = false;
 bool wsFlag = 0;
+volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
+
+byte mac[6];
+
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -148,11 +152,11 @@ String jsonMessage = "";
 // ip address definitions
 //====================================================
 // Since the esp is also on its own network... it has a local ip that isn't used for anything. 
-IPAddress local(192, 168, 3, 1);
+IPAddress local(10, 42, 0, 135);
 // throwing googles dns in for a temp fix
 IPAddress testdns(8,8,8,8); 
 // Since we are serving as an access point this is the address where the websockets will be posted
-IPAddress gateway(192, 168, 3, 1);
+IPAddress gateway(10, 42, 0, 1);
 // These are set to the same just for ease of use. 
 IPAddress nmask(255, 255, 255, 0);
 //====================================================
@@ -258,8 +262,9 @@ void TimerHandler() {
     // every 1/10 second
   if ((interruptCounter % 10000) == 0) {
     if (redLedDelay) redLedDelay--;
-    if (wsDelay) wsDelay--;
+    if (wsReconnectDelay) wsReconnectDelay--;
     if (relayDelay) relayDelay--;
+    if (wsDelay) wsDelay--;
   }
 
   // every second
@@ -281,6 +286,7 @@ Portenta_H7_Timer ITimer(TIM16);
 // setup
 //====================================================
 void setup() {
+  digitalWrite(RED_LED, LOW);
 
   // initialize m4 core
   bootM4();
@@ -292,13 +298,43 @@ void setup() {
 
   // wifi setup
   while (!Serial && millis() < 2000);
+
+  
+
+  WiFi.begin(ssid, password);
+
+  delay(500);
   WiFi.config(local, testdns, gateway, nmask);
   delay(500);
-  WiFi.beginAP(ssid, password);
-  while (WiFi.status() != WL_CONNECTED && millis() < 5000);
+
+  while (WiFi.status() != WL_CONNECTED){
+    delay(1000);
+    WiFi.begin(ssid, password);
+    delay(1000);
+    WiFi.config(local, testdns, gateway, nmask);
+    delay(1000);
+    Serial.println("trying to connect");
+  }
+  digitalWrite(RED_LED, HIGH);
+
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+  Serial.println("Mac address: ");
+  
+  WiFi.macAddress(mac);
+
+  Serial.print(mac[5],HEX);
+  Serial.print(":");
+  Serial.print(mac[4],HEX);
+  Serial.print(":");
+  Serial.print(mac[3],HEX);
+  Serial.print(":");
+  Serial.print(mac[2],HEX);
+  Serial.print(":");
+  Serial.print(mac[1],HEX);
+  Serial.print(":");
+  Serial.println(mac[0],HEX);
   // end wifi setup
 
 
@@ -362,7 +398,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     case LED_ON:
@@ -371,7 +407,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        Serial.println(String(millis()/1000.0));
+        //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
     default:
@@ -545,56 +581,64 @@ void RelayMachine(void){
 //====================================================
 void WebSocketMachine() {
 
-  wsConnected = wsClient.available();
-  checkToSendMessage();
-  
-  // let the websockets client check for incoming messages
-  if (wsClient.available()) {
+// the websocket machine here has two states
+// it can be connected or not
+// if connected it needs to send and receive messages
+// if not connected it needs to tell us and try to get connected
+  switch(wsState){
+    case WS_DISCONNECTED:
+      if (!wsReconnectDelay) {
+        Serial.println("accepting new");
+        delay(1000);
+        wsClient.close();
+        wsClient = wsServer.accept();
+        wsConnected = wsClient.available();
 
-    wsClient.poll();
-    now = millis();
+        if (wsConnected){
+          // register callback when messages are received
+          wsClient.onMessage(onMessageCallback);
+          // register callback when events are occuring          
+          wsClient.onEvent(onEventsCallback);
+          // 
 
-    // Send heartbeat in order to avoid disconnections during ISP resetting IPs over night. Thanks @MacSass
-    if ((now - heartbeatTimestamp) > HEARTBEAT_INTERVAL) {
-      heartbeatTimestamp = now;
-      wsClient.send("H");
-    }
+          // change state to connected
+          wsState = WS_CONNECTED;
+
+          Serial.println("Connected!");
+          digitalWrite(GREEN_LED, LOW);
+          digitalWrite(RED_LED, HIGH);
+
+        }
+        wsReconnectDelay = 5;
+      }
+    break;
+    case WS_CONNECTED:
+      if (!wsClient.available()) {
+        wsState = WS_DISCONNECTED;
+        Serial.println("Disconnected!");
+        digitalWrite(GREEN_LED, HIGH);
+        digitalWrite(RED_LED, LOW);
+      }
+
+      if (!wsDelay && wsClient.available()) {
+        Serial.println("Sent");
+        wsClient.ping();    
+
+        wsDelay = 5;
+      }
+      
+      wsClient.poll();
+
+    break;
+    default:
+    break;
   }
+
 
 }
 
-void checkToSendMessage() {
-  #define REPEAT_INTERVAL    1000L
-  static unsigned long checkstatus_timeout = 1000;
-  // Send WebSockets message every REPEAT_INTERVAL (10) seconds.
-  if (millis() > checkstatus_timeout) {
-    sendMessage();
-    checkstatus_timeout = millis() + REPEAT_INTERVAL;
-  }
-}
 
-void sendMessage() {
-  // try to connect to Websockets server
-  if (!wsConnected) {
-    wsClient = wsServer.accept();
-    wsConnected = wsClient.available();
-    // run callback when messages are received
-    wsClient.onMessage(onMessageCallback);
-    // run callback when events are occuring
-    wsClient.onEvent(onEventsCallback);
-  }
-  
-  if (wsConnected) {
-    Serial.println("Connected!");
-    digitalWrite(GREEN_LED, LOW);
-  } 
 
-  else {
-    digitalWrite(GREEN_LED, HIGH);
-    Serial.println("Not Connected!");
-    //Serial.println(wsConnected);
-  }
-}
 
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Got Message: ");
@@ -612,21 +656,24 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println(String(millis()/1000.0/60.0));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
-    delay(2000);
+    //delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
     //Serial.println("Got a Ping!");
-    Serial.println(ultrasonic_value);
+    //Serial.println(ultrasonic_value);
     SendJsonMachine();
     wsClient.send(jsonMessage);
 
   }
 
   else if (event == WebsocketsEvent::GotPong) {
-    Serial.println("Got a Pong!");
+    //Serial.println("Got a Pong!");
+    //SendJsonMachine();
+    //wsClient.send(jsonMessage);
   }
 }
 //====================================================
