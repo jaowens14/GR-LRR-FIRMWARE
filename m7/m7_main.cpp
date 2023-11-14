@@ -47,9 +47,12 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "10.42.0.135"
-const char* ssid = "grlrr2023"; //Enter SSID
-const char* password = "grlrr2023"; //Enter Password
+
+const uint16_t websockets_server_port = WEBSOCKETS_PORT;
+const char* websockets_server_host = "10.42.0.109";
+
+const char* ssid = "grlrr2024"; //Enter SSID
+const char* password = "grlrr2024"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
@@ -60,6 +63,7 @@ volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
 
 byte mac[6];
+
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -338,7 +342,7 @@ void setup() {
 
 
   // websocket setup
-  wsServer.listen(WEBSOCKETS_PORT);
+  wsServer.listen(websockets_server_port);
   Serial.println("websocket server listening...");
   // end websocket setup
 
@@ -579,7 +583,7 @@ void RelayMachine(void){
 // websocket machine
 //====================================================
 void WebSocketMachine() {
-
+wsClient.poll();
 // the websocket machine here has two states
 // it can be connected or not
 // if connected it needs to send and receive messages
@@ -589,7 +593,6 @@ void WebSocketMachine() {
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
         delay(1000);
-        wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
 
@@ -619,14 +622,12 @@ void WebSocketMachine() {
         digitalWrite(RED_LED, LOW);
       }
 
-      if (!wsDelay && wsClient.available()) {
-        Serial.println("Sent");
-        wsClient.ping();    
-
-        wsDelay = 5;
+      if (!wsDelay && wsClient.available()) {   
+        wsDelay = 3;
+        SendJsonMachine();
+        wsClient.send(jsonMessage);
       }
-      
-      wsClient.poll();
+
 
     break;
     default:
@@ -640,8 +641,8 @@ void WebSocketMachine() {
 
 
 void onMessageCallback(WebsocketsMessage message) {
-    //Serial.print("Got Message: ");
-    //Serial.println(message.data());
+    Serial.print("Got Message: ");
+    Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
     ReceiveJsonMachine();
@@ -655,24 +656,18 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println(String(millis()/1000.0/60.0));
+    Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
     //delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    //Serial.println("Got a Ping!");
-    //Serial.println(ultrasonic_value);
-    SendJsonMachine();
-    wsClient.send(jsonMessage);
-
+    Serial.println("Got a Ping!");
   }
 
   else if (event == WebsocketsEvent::GotPong) {
-    //Serial.println("Got a Pong!");
-    //SendJsonMachine();
-    //wsClient.send(jsonMessage);
+    Serial.println("Got a Pong!");
   }
 }
 //====================================================

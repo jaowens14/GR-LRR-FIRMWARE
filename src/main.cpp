@@ -47,9 +47,12 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "10.42.0.135"
-const char* ssid = "grlrr2023"; //Enter SSID
-const char* password = "grlrr2023"; //Enter Password
+
+const uint16_t websockets_server_port = WEBSOCKETS_PORT;
+const char* websockets_server_host = "10.42.0.109";
+
+const char* ssid = "grlrr2024"; //Enter SSID
+const char* password = "grlrr2024"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
@@ -60,6 +63,7 @@ volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
 
 byte mac[6];
+
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -70,14 +74,15 @@ byte mac[6];
 //====================================================
 // stepper definitions
 //====================================================
-//#include <AccelStepper.h>
-//#define STEPPER_STEP_PIN 4
-//#define STEPPER_DIRECTION_PIN 5
-//AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-//int stepper1Position = 0;
+#include <SPI.h>
+#include <HighPowerStepperDriver.h>
+const uint8_t CSPin = D7;
+HighPowerStepperDriver sd;
+
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
+volatile int stepperDelay = 0;
 //====================================================
 // end stepper definitions
 //====================================================
@@ -178,8 +183,7 @@ void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
-void sendMessage(void);
-void checkToSendMessage(void);
+void StepperMachine(void);
 void ReceiveJsonMachine(void);
 void SendJsonMachine(void);
 void CommandToEnumState(void);
@@ -226,6 +230,13 @@ enum RelayStates {
 };
 RelayStates RelayState;
 
+enum StepperStates {
+  INIT,
+  RUN,
+  ERR
+};
+StepperStates StepperState;
+
 //====================================================
 // end states
 //====================================================
@@ -269,6 +280,7 @@ void TimerHandler() {
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
+    if (stepperDelay) stepperDelay--;
     interruptCounter = 0;
   }
 
@@ -338,7 +350,7 @@ void setup() {
 
 
   // websocket setup
-  wsServer.listen(WEBSOCKETS_PORT);
+  wsServer.listen(websockets_server_port);
   Serial.println("websocket server listening...");
   // end websocket setup
 
@@ -355,6 +367,10 @@ void setup() {
   // ultrasonic setup
   analogReadResolution(16);
   pinMode(ULTRASONIC_PIN, INPUT);
+
+  //stepper driver setup
+  SPI.begin();
+
 
 }
 //====================================================
@@ -374,6 +390,7 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   StepperSpeedMachine();
+  StepperMachine();
   RelayMachine();
 }
 //====================================================
@@ -551,23 +568,67 @@ void RelayMachine(void){
 //====================================================
 // stepper machine
 //====================================================
-//void StepperMachine(void) {
-//  switch(stepperState) {
-//    case STEPPER_STOPPED:
-//      stepper1.stop();
-//    break;
-//    case STEPPER_FORWARD:
-//      stepper1.move(10);
-//    break;
-//    case STEPPER_BACKWARD:
-//      stepper1.move(-10);
-//    break;
-//    default:
-//    break;
-//  }
-//  stepper1.run();
-//
-//}
+void StepperMachine(void) {
+  switch(StepperState) {
+    case INIT:
+
+      if (!stepperDelay) {
+        Serial.println("Initializing the stepper drivers");
+        // initialize the stepper drivers
+        sd.setChipSelectPin(CSPin);
+        // Give the driver some time to power up.
+        delay(10);
+        // Reset the driver to its default settings and clear latched status
+        // conditions.
+        sd.resetSettings();
+        sd.clearStatus();
+        // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+        // for most applications, and we find that it usually works well.
+        sd.setDecayMode(HPSDDecayMode::AutoMixed);
+        // Set the current limit. You should change the number here to an appropriate
+        // value for your particular system.
+        sd.setCurrentMilliamps36v4(750);
+        // Set the number of microsteps that correspond to one full step.
+        sd.setStepMode(HPSDStepMode::MicroStep4);
+        // enable the drivers
+        sd.enableDriver();
+      }
+
+      if (sd.verifySettings() && !stepperDelay) {
+        StepperState = RUN;
+      }
+
+      
+    break;
+    case RUN:
+
+      if(sd.readStatus() && !stepperDelay){
+        StepperState = ERR;
+        Serial.println("We have a stepper error");
+        stepperDelay = 2; // seconds
+      }
+      
+      if (!stepperDelay) {
+        Serial.println("Stepper in RUN");
+      }
+      
+    break;
+    case ERR:
+
+      if(!sd.readStatus() && !stepperDelay){
+        StepperState = RUN;
+        Serial.println("Stepper Error has been cleared");
+        stepperDelay = 2; // seconds
+      }
+
+      
+    break;
+    default:
+    break;
+  }
+  
+
+}
 //====================================================
 // end stepper machine
 //====================================================
@@ -579,7 +640,7 @@ void RelayMachine(void){
 // websocket machine
 //====================================================
 void WebSocketMachine() {
-
+wsClient.poll();
 // the websocket machine here has two states
 // it can be connected or not
 // if connected it needs to send and receive messages
@@ -619,14 +680,13 @@ void WebSocketMachine() {
         digitalWrite(RED_LED, LOW);
       }
 
-      if (!wsDelay && wsClient.available()) {
-        Serial.println("Sent");
-        wsClient.ping();    
-
-        wsDelay = 5;
+      if (!wsDelay && wsClient.available()) {   
+        wsDelay = 3;
+        SendJsonMachine();
+        wsClient.send(jsonMessage);
+        //Serial.println("Just send a message");
       }
-      
-      wsClient.poll();
+
 
     break;
     default:
@@ -640,8 +700,8 @@ void WebSocketMachine() {
 
 
 void onMessageCallback(WebsocketsMessage message) {
-    //Serial.print("Got Message: ");
-    //Serial.println(message.data());
+    Serial.print("Got Message: ");
+    Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
     ReceiveJsonMachine();
@@ -655,24 +715,18 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
-    Serial.println(String(millis()/1000.0/60.0));
+    Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
     //delay(2000);
   }
 
   else if (event == WebsocketsEvent::GotPing) {
-    //Serial.println("Got a Ping!");
-    //Serial.println(ultrasonic_value);
-    SendJsonMachine();
-    wsClient.send(jsonMessage);
-
+    Serial.println("Got a Ping!");
   }
 
   else if (event == WebsocketsEvent::GotPong) {
-    //Serial.println("Got a Pong!");
-    //SendJsonMachine();
-    //wsClient.send(jsonMessage);
+    Serial.println("Got a Pong!");
   }
 }
 //====================================================
