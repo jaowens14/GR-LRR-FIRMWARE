@@ -184,7 +184,7 @@ void setup() {
 
   // Set the current limit. You should change the number here to an appropriate
   // value for your particular system.
-  sd.setCurrentMilliamps36v4(1000);
+  sd.setCurrentMilliamps36v4(750);
 
   // Set the number of microsteps that correspond to one full step.
   sd.setStepMode(HPSDStepMode::MicroStep4);

@@ -47,9 +47,9 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <WebSockets2_Generic.h>
 #include <WiFi.h>
 #define WEBSOCKETS_PORT     8080
-#define WEBSOCKETS_HOST     "10.42.0.109"
-const char* ssid = "grlrr2024"; //Enter SSID
-const char* password = "grlrr2024"; //Enter Password
+#define WEBSOCKETS_HOST     "10.42.0.135"
+const char* ssid = "grlrr2023"; //Enter SSID
+const char* password = "grlrr2023"; //Enter Password
 using namespace websockets2_generic;
 #define HEARTBEAT_INTERVAL      300000 // 5 Minutes
 uint64_t heartbeatTimestamp     = 0;
@@ -60,7 +60,6 @@ volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
 
 byte mac[6];
-
 //====================================================
 // end wifi and websockets definitions
 //====================================================
@@ -641,8 +640,8 @@ void WebSocketMachine() {
 
 
 void onMessageCallback(WebsocketsMessage message) {
-    Serial.print("Got Message: ");
-    Serial.println(message.data());
+    //Serial.print("Got Message: ");
+    //Serial.println(message.data());
     // save string message to global variable 
     jsonMessage = message.data();
     ReceiveJsonMachine();
