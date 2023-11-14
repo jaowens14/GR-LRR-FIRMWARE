@@ -245,7 +245,6 @@ void loop() {
 void StepperMachine(void) {
   stepperSpeed = xfr_ptr->stepperSpeed;
   stepperCommand = xfr_ptr->stepperCommand;
-  estopState     = xfr_ptr->estopState;
 
   stepper1.loop();
   stepper2.loop();
