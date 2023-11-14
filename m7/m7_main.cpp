@@ -74,11 +74,16 @@ byte mac[6];
 //====================================================
 // stepper definitions
 //====================================================
+#include <SPI.h>
+#include <HighPowerStepperDriver.h>
+
+const uint8_t CSPin = D7;
+HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
-
+volatile int stepperDelay = 0;
 //====================================================
 // end stepper definitions
 //====================================================
@@ -226,6 +231,14 @@ enum RelayStates {
 };
 RelayStates RelayState;
 
+enum StepperStates {
+  OFF,
+  INIT,
+  RUN,
+  ERR
+};
+StepperStates StepperState;
+
 
 //====================================================
 // end states
@@ -270,6 +283,7 @@ void TimerHandler() {
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
+    if (stepperDelay) stepperDelay--;
     interruptCounter = 0;
   }
 
@@ -358,7 +372,25 @@ void setup() {
   pinMode(ULTRASONIC_PIN, INPUT);
 
 
-
+  // spi setup for steppers:
+  SPI.begin();
+  sd.setChipSelectPin(CSPin);
+  // Give the driver some time to power up.
+  delay(10);
+  // Reset the driver to its default settings and clear latched status
+  // conditions.
+  sd.resetSettings();
+  sd.clearStatus();
+  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+  // for most applications, and we find that it usually works well.
+  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+  // Set the current limit. You should change the number here to an appropriate
+  // value for your particular system.
+  sd.setCurrentMilliamps36v4(750);
+  // Set the number of microsteps that correspond to one full step.
+  sd.setStepMode(HPSDStepMode::MicroStep4);
+  // Enable the motor outputs.
+  sd.enableDriver();
 
 }
 //====================================================
@@ -378,7 +410,7 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   StepperSpeedMachine();
-
+  StepperMachine();
   RelayMachine();
 }
 //====================================================
@@ -577,7 +609,7 @@ wsClient.poll();
     case WS_DISCONNECTED:
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
-        delay(1000);
+        //delay(1000);
         wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
@@ -587,8 +619,6 @@ wsClient.poll();
           wsClient.onMessage(onMessageCallback);
           // register callback when events are occuring          
           wsClient.onEvent(onEventsCallback);
-          // 
-
           // change state to connected
           wsState = WS_CONNECTED;
 
@@ -609,13 +639,11 @@ wsClient.poll();
       }
 
       if (!wsDelay && wsClient.available()) {   
-        wsDelay = 3;
+        wsDelay = 2; // 2/10 seconds
         SendJsonMachine();
         wsClient.send(jsonMessage);
         //Serial.println("Just send a message");
       }
-
-
     break;
     default:
     break;
@@ -625,8 +653,6 @@ wsClient.poll();
 }
 
 
-
-
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Got Message: ");
     Serial.println(message.data());
@@ -634,6 +660,7 @@ void onMessageCallback(WebsocketsMessage message) {
     jsonMessage = message.data();
     ReceiveJsonMachine();
   }
+
 
 void onEventsCallback(WebsocketsEvent event, String data) {
   (void) data;
@@ -717,34 +744,73 @@ void ReceiveJsonMachine(void) {
 
 
 
+
 //====================================================
-// stepper command string to enum state
+// stepper machine
 //====================================================
-//void CommandToEnumState(void) {
-//  Serial.println("Got command: ");
-//  Serial.println(stepperCommand);
-//  switch(stepperCommand) {
-//      case 0:
-//        stepperState = STEPPER_STOPPED;
-//        xfr_ptr->stepperCommand = 0;
-//      break;
-//      case 1:
-//        stepperState = STEPPER_FORWARD;
-//        xfr_ptr->stepperCommand = 1;
-//
-//      break;
-//      case 2:
-//        stepperState = STEPPER_BACKWARD;
-//        xfr_ptr->stepperCommand = 2;
-//
-//      break;
-//      default:
-//      break;
-//    }
-//  }
-////====================================================
-// end stepper command string to enum state
+void StepperMachine() {
+  switch(StepperState) {
+    case OFF:
+      if (wsConnected && !estop) { // if we are connected and the estop is not pressed go to init
+        StepperState = INIT;
+      }
+
+      if (!stepperDelay && !wsConnected) {
+        sd.disableDriver();
+        stepperDelay = 2; //seconds 
+      }
+    break;
+
+    case INIT:
+      Serial.println("Initializing Stepper Drivers");
+      sd.resetSettings();
+      sd.clearStatus();
+      // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+      // for most applications, and we find that it usually works well.
+      sd.setDecayMode(HPSDDecayMode::AutoMixed);
+      // Set the current limit. You should change the number here to an appropriate
+      // value for your particular system.
+      sd.setCurrentMilliamps36v4(750);
+      // Set the number of microsteps that correspond to one full step.
+      sd.setStepMode(HPSDStepMode::MicroStep4);
+      // Enable the motor outputs.
+      sd.enableDriver();
+      StepperState = RUN;
+      stepperDelay = 4; // seconds to let things setttle?
+    break;
+
+    case RUN:
+
+      if (!wsConnected || estop) { // if the websocket is disconnected or the estop is pressed go to off
+        sd.disableDriver();
+        xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
+        stepperCommand = 0;          // set both to 0
+        StepperState = OFF;
+      }
+
+
+    break;
+    case ERR:
+      if (!stepperDelay) {
+        Serial.println("Steppers are in error");
+        Serial.print("The stepper error is: ");
+        Serial.println(sd.readStatus());
+
+        StepperState = INIT;
+        stepperDelay = 2;
+      }
+
+    default:
+    break;
+  }
+}
+
+
 //====================================================
+// end stepper machine
+//====================================================
+
+
 
 
 //====================================================

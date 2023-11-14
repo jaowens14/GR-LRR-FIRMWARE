@@ -45,26 +45,19 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // stepper definitions
 //====================================================
-#include <SPI.h>
-#include <HighPowerStepperDriver.h>
 #include <ContinuousStepper.h>
 
 
 const uint8_t Step1Pin = D6;
 const uint8_t Step2Pin = D12;
 
-const uint8_t CSPin = D7;
 const uint8_t DirPin = D7;
 
-HighPowerStepperDriver sd;
 ContinuousStepper<StepperDriver> stepper1;
 ContinuousStepper<StepperDriver> stepper2;
 
 int stepperCommand = 0;
 long stepperSpeed = 0;
-bool estopState = 0; // 0 is no emergency, 1 is emergency
-bool estopFlag = 0;  // 0 is 
-
 //====================================================
 // end stepper definitions
 //====================================================
@@ -134,12 +127,6 @@ void StepperMachine(void);
 //====================================================
 // states
 //====================================================
-enum StepperStates { 
-  INIT, // 0
-  RUN, // 1
-  ERR // 2
-};
-StepperStates StepperState;
 //====================================================
 // end states
 //====================================================
@@ -170,31 +157,6 @@ StepperStates StepperState;
 // setup
 //====================================================
 void setup() {
-  SPI.begin();
-  sd.setChipSelectPin(CSPin);
-
-  // Give the driver some time to power up.
-  delay(10);
-
-  // Reset the driver to its default settings and clear latched status
-  // conditions.
-  sd.resetSettings();
-  sd.clearStatus();
-
-  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-  // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::AutoMixed);
-
-  // Set the current limit. You should change the number here to an appropriate
-  // value for your particular system.
-  sd.setCurrentMilliamps36v4(750);
-
-  // Set the number of microsteps that correspond to one full step.
-  sd.setStepMode(HPSDStepMode::MicroStep4);
-
-  // Enable the motor outputs.
-  sd.enableDriver();
-
   // change the pin to use it for motion
   // Drive the STEP and DIR pins low initially.
   pinMode(Step1Pin, OUTPUT);
@@ -210,7 +172,6 @@ void setup() {
   stepper1.setAcceleration(6400); 
   stepper2.setAcceleration(6400); 
   // end stepper setup
-
 }
 //====================================================
 // end setup
@@ -223,9 +184,7 @@ void setup() {
 // main loop
 //====================================================
 void loop() {
-
   StepperMachine();
-
 }
 //====================================================
 // end main loop
@@ -248,7 +207,7 @@ void StepperMachine(void) {
 
   stepper1.loop();
   stepper2.loop();
-
+  
   switch(stepperCommand) {
     case 0:
       stepper1.stop();
