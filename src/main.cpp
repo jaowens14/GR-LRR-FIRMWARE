@@ -74,15 +74,11 @@ byte mac[6];
 //====================================================
 // stepper definitions
 //====================================================
-#include <SPI.h>
-#include <HighPowerStepperDriver.h>
-const uint8_t CSPin = D7;
-HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
-volatile int stepperDelay = 0;
+
 //====================================================
 // end stepper definitions
 //====================================================
@@ -230,12 +226,6 @@ enum RelayStates {
 };
 RelayStates RelayState;
 
-enum StepperStates {
-  INIT,
-  RUN,
-  ERR
-};
-StepperStates StepperState;
 
 //====================================================
 // end states
@@ -280,7 +270,6 @@ void TimerHandler() {
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
-    if (stepperDelay) stepperDelay--;
     interruptCounter = 0;
   }
 
@@ -368,8 +357,7 @@ void setup() {
   analogReadResolution(16);
   pinMode(ULTRASONIC_PIN, INPUT);
 
-  //stepper driver setup
-  SPI.begin();
+
 
 
 }
@@ -390,7 +378,7 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   StepperSpeedMachine();
-  StepperMachine();
+
   RelayMachine();
 }
 //====================================================
@@ -568,67 +556,7 @@ void RelayMachine(void){
 //====================================================
 // stepper machine
 //====================================================
-void StepperMachine(void) {
-  switch(StepperState) {
-    case INIT:
 
-      if (!stepperDelay) {
-        Serial.println("Initializing the stepper drivers");
-        // initialize the stepper drivers
-        sd.setChipSelectPin(CSPin);
-        // Give the driver some time to power up.
-        delay(10);
-        // Reset the driver to its default settings and clear latched status
-        // conditions.
-        sd.resetSettings();
-        sd.clearStatus();
-        // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-        // for most applications, and we find that it usually works well.
-        sd.setDecayMode(HPSDDecayMode::AutoMixed);
-        // Set the current limit. You should change the number here to an appropriate
-        // value for your particular system.
-        sd.setCurrentMilliamps36v4(750);
-        // Set the number of microsteps that correspond to one full step.
-        sd.setStepMode(HPSDStepMode::MicroStep4);
-        // enable the drivers
-        sd.enableDriver();
-      }
-
-      if (sd.verifySettings() && !stepperDelay) {
-        StepperState = RUN;
-      }
-
-      
-    break;
-    case RUN:
-
-      if(sd.readStatus() && !stepperDelay){
-        StepperState = ERR;
-        Serial.println("We have a stepper error");
-        stepperDelay = 2; // seconds
-      }
-      
-      if (!stepperDelay) {
-        Serial.println("Stepper in RUN");
-      }
-      
-    break;
-    case ERR:
-
-      if(!sd.readStatus() && !stepperDelay){
-        StepperState = RUN;
-        Serial.println("Stepper Error has been cleared");
-        stepperDelay = 2; // seconds
-      }
-
-      
-    break;
-    default:
-    break;
-  }
-  
-
-}
 //====================================================
 // end stepper machine
 //====================================================

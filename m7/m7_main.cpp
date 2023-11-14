@@ -74,14 +74,11 @@ byte mac[6];
 //====================================================
 // stepper definitions
 //====================================================
-//#include <AccelStepper.h>
-//#define STEPPER_STEP_PIN 4
-//#define STEPPER_DIRECTION_PIN 5
-//AccelStepper stepper1(AccelStepper::FULL2WIRE, STEPPER_STEP_PIN, STEPPER_DIRECTION_PIN);
-//int stepper1Position = 0;
+
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
+
 //====================================================
 // end stepper definitions
 //====================================================
@@ -182,8 +179,7 @@ void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
-void sendMessage(void);
-void checkToSendMessage(void);
+void StepperMachine(void);
 void ReceiveJsonMachine(void);
 void SendJsonMachine(void);
 void CommandToEnumState(void);
@@ -229,6 +225,7 @@ enum RelayStates {
   RELAY_ON
 };
 RelayStates RelayState;
+
 
 //====================================================
 // end states
@@ -360,6 +357,9 @@ void setup() {
   analogReadResolution(16);
   pinMode(ULTRASONIC_PIN, INPUT);
 
+
+
+
 }
 //====================================================
 // end setup
@@ -378,6 +378,7 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   StepperSpeedMachine();
+
   RelayMachine();
 }
 //====================================================
@@ -555,23 +556,7 @@ void RelayMachine(void){
 //====================================================
 // stepper machine
 //====================================================
-//void StepperMachine(void) {
-//  switch(stepperState) {
-//    case STEPPER_STOPPED:
-//      stepper1.stop();
-//    break;
-//    case STEPPER_FORWARD:
-//      stepper1.move(10);
-//    break;
-//    case STEPPER_BACKWARD:
-//      stepper1.move(-10);
-//    break;
-//    default:
-//    break;
-//  }
-//  stepper1.run();
-//
-//}
+
 //====================================================
 // end stepper machine
 //====================================================
@@ -593,6 +578,7 @@ wsClient.poll();
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
         delay(1000);
+        wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
 
@@ -626,6 +612,7 @@ wsClient.poll();
         wsDelay = 3;
         SendJsonMachine();
         wsClient.send(jsonMessage);
+        //Serial.println("Just send a message");
       }
 
 
