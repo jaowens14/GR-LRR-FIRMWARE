@@ -609,7 +609,7 @@ wsClient.poll();
       }
 
       if (!wsDelay && wsClient.available()) {   
-        wsDelay = 3;
+        wsDelay = 2; // 2/10 seconds
         SendJsonMachine();
         wsClient.send(jsonMessage);
         //Serial.println("Just send a message");
@@ -713,37 +713,6 @@ void ReceiveJsonMachine(void) {
 }
 //====================================================
 // end receive json machine
-//====================================================
-
-
-
-//====================================================
-// stepper command string to enum state
-//====================================================
-//void CommandToEnumState(void) {
-//  Serial.println("Got command: ");
-//  Serial.println(stepperCommand);
-//  switch(stepperCommand) {
-//      case 0:
-//        stepperState = STEPPER_STOPPED;
-//        xfr_ptr->stepperCommand = 0;
-//      break;
-//      case 1:
-//        stepperState = STEPPER_FORWARD;
-//        xfr_ptr->stepperCommand = 1;
-//
-//      break;
-//      case 2:
-//        stepperState = STEPPER_BACKWARD;
-//        xfr_ptr->stepperCommand = 2;
-//
-//      break;
-//      default:
-//      break;
-//    }
-//  }
-////====================================================
-// end stepper command string to enum state
 //====================================================
 
 
