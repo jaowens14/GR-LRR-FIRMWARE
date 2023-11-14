@@ -583,7 +583,7 @@ void RelayMachine(void){
 // websocket machine
 //====================================================
 void WebSocketMachine() {
-
+wsClient.poll();
 // the websocket machine here has two states
 // it can be connected or not
 // if connected it needs to send and receive messages
@@ -593,7 +593,6 @@ void WebSocketMachine() {
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
         delay(1000);
-        wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
 
@@ -623,14 +622,12 @@ void WebSocketMachine() {
         digitalWrite(RED_LED, LOW);
       }
 
-      if (!wsDelay && wsClient.available()) {
-        Serial.println("Sent ping");
-        wsClient.ping();    
-
-        wsDelay = 5;
+      if (!wsDelay && wsClient.available()) {   
+        wsDelay = 3;
+        SendJsonMachine();
+        wsClient.send(jsonMessage);
       }
-      
-      wsClient.poll();
+
 
     break;
     default:
@@ -667,18 +664,10 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 
   else if (event == WebsocketsEvent::GotPing) {
     Serial.println("Got a Ping!");
-    Serial.println(ultrasonic_value);
-    //SendJsonMachine();
-    //wsClient.send(jsonMessage);
-
   }
 
   else if (event == WebsocketsEvent::GotPong) {
     Serial.println("Got a Pong!");
-    //SendJsonMachine();
-    
-    //wsClient.sendBinary("101");
-
   }
 }
 //====================================================
