@@ -17,7 +17,8 @@
 struct shared_data {
   long stepperSpeed = 0; // buffer
   int stepperCommand = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
-};
+  bool estopState = 0;         // estop state : 0 = no emergency, 1 = emergency 
+};                        // estop state : 0 = sd.Enabled(), 1 = sd.Disabled()
 volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // end shared data
@@ -61,6 +62,8 @@ ContinuousStepper<StepperDriver> stepper2;
 
 int stepperCommand = 0;
 long stepperSpeed = 0;
+bool estopState = 0; // 0 is no emergency, 1 is emergency
+bool estopFlag = 0;  // 0 is 
 
 //====================================================
 // end stepper definitions
@@ -132,11 +135,11 @@ void StepperMachine(void);
 // states
 //====================================================
 enum StepperStates { 
-  STEPPER_STOPPED, // 0
-  STEPPER_FORWARD, // 1
-  STEPPER_BACKWARD // 2
+  INIT, // 0
+  RUN, // 1
+  ERR // 2
 };
-StepperStates stepperState;
+StepperStates StepperState;
 //====================================================
 // end states
 //====================================================
@@ -242,6 +245,7 @@ void loop() {
 void StepperMachine(void) {
   stepperSpeed = xfr_ptr->stepperSpeed;
   stepperCommand = xfr_ptr->stepperCommand;
+  estopState     = xfr_ptr->estopState;
 
   stepper1.loop();
   stepper2.loop();
