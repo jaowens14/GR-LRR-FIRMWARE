@@ -116,9 +116,9 @@ int ultrasonicSampleNumber = 0;
 // PID definitions
 //====================================================
 double setpoint = 4000;
-double Kp = 1;
-double Ki = 1;
-double Kd = 1;
+double Kp = 0.1;
+double Ki = 0;
+double Kd = 0;
 
 double last_error = 0;
 double current_error = 0;
