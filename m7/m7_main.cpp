@@ -84,6 +84,8 @@ int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 volatile int stepperDelay = 0;
+long milliamps = 1000;
+
 //====================================================
 // end stepper definitions
 //====================================================
@@ -102,8 +104,33 @@ long ultrasonic_value = 0;
 volatile int ultrasonicDelay = 0;
 bool ultrasonicFlag = 0;
 long current_time = 0;
+
+double aveUltrasonicValue = 0;
+const int numUltrasonicSamples = 20;
+long ultrasonicSamples[numUltrasonicSamples] = {0};
+int ultrasonicSampleNumber = 0;
 //====================================================
 // end ultrasonic definitions
+//====================================================
+
+
+//====================================================
+// PID definitions
+//====================================================
+double setpoint = 4000;
+double Kp = 0.1;
+double Ki = 0;
+double Kd = 0;
+
+double last_error = 0;
+double current_error = 0;
+double changeError = 0;
+double totalError = 0;
+double pidTerm = 0;
+double pidTerm_scaled = 0;
+
+//====================================================
+// end PID definitions
 //====================================================
 
 
@@ -143,7 +170,7 @@ bool estop = false;
 //====================================================
 #include <ArduinoJson.h>
 // json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
-StaticJsonDocument<256> jsonPacket;
+StaticJsonDocument<512> jsonPacket;
 // json message is a string that contains all the info smashed together
 String jsonMessage = "";
 //====================================================
@@ -189,6 +216,7 @@ void ReceiveJsonMachine(void);
 void SendJsonMachine(void);
 void CommandToEnumState(void);
 long microsecondsToCentimeters(long);
+void StepperPID(void);
 //====================================================
 // end function prototypes
 //====================================================
@@ -302,6 +330,28 @@ Portenta_H7_Timer ITimer(TIM16);
 void setup() {
   digitalWrite(RED_LED, LOW);
 
+  // spi setup for steppers:
+  SPI.begin();
+
+  sd.setChipSelectPin(CSPin);
+  // Give the driver some time to power up.
+  delay(10);
+  // Reset the driver to its default settings and clear latched status
+  // conditions.
+  sd.resetSettings();
+  sd.clearStatus();
+  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+  // for most applications, and we find that it usually works well.
+  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+  // Set the current limit. You should change the number here to an appropriate
+  // value for your particular system.
+  sd.setCurrentMilliamps36v4(milliamps);
+
+  // Set the number of microsteps that correspond to one full step.
+  sd.setStepMode(HPSDStepMode::MicroStep1);
+  // Enable the motor outputs.
+  //sd.enableDriver();
+
   // initialize m4 core
   bootM4();
 
@@ -372,25 +422,6 @@ void setup() {
   pinMode(ULTRASONIC_PIN, INPUT);
 
 
-  // spi setup for steppers:
-  SPI.begin();
-  sd.setChipSelectPin(CSPin);
-  // Give the driver some time to power up.
-  delay(10);
-  // Reset the driver to its default settings and clear latched status
-  // conditions.
-  sd.resetSettings();
-  sd.clearStatus();
-  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-  // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::AutoMixed);
-  // Set the current limit. You should change the number here to an appropriate
-  // value for your particular system.
-  sd.setCurrentMilliamps36v4(750);
-  // Set the number of microsteps that correspond to one full step.
-  sd.setStepMode(HPSDStepMode::MicroStep4);
-  // Enable the motor outputs.
-  sd.enableDriver();
 
 }
 //====================================================
@@ -502,8 +533,17 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = (analogRead(ULTRASONIC_PIN) + ultrasonic_value)/2.0;
-      ultrasonicDelay = 40;
+      ultrasonic_value = analogRead(ULTRASONIC_PIN);
+      ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonic_value;
+
+      if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
+
+      aveUltrasonicValue = 0;
+
+      for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
+      aveUltrasonicValue /= numUltrasonicSamples;
+
+      ultrasonicDelay = 50; // 50/1000 seconds
       UltrasonicState = UT_WAITING;
     break;
     default:
@@ -511,6 +551,7 @@ void UltrasonicMachine() {
   }
 
 }
+
 
 long microsecondsToCentimeters(long microseconds) {
   // The speed of sound is 340 m/s or 29 microseconds per centimeter.
@@ -542,7 +583,7 @@ void StepperSpeedMachine(void) {
         xfr_ptr->stepperSpeed = stepperSpeed;
 
       }
-      stepperSpeed = map(ultrasonic_value, 0, 20000, 0, 22000);
+      StepperPID();
       xfr_ptr->stepperSpeed = stepperSpeed;
 
     break;
@@ -551,6 +592,23 @@ void StepperSpeedMachine(void) {
   }
 
 }
+
+void StepperPID(void) {
+  current_error= setpoint - aveUltrasonicValue;
+  
+  changeError = current_error - last_error; // derivative term
+  totalError += current_error; //accumalate errors to find integral term
+  pidTerm = (Kp * current_error) + (Ki * totalError) + (Kd * changeError);//total gain
+  pidTerm = constrain(pidTerm, -10000, 10000);//constraining to appropriate value
+  pidTerm_scaled = abs(pidTerm);//make sure it's a positive value
+
+  stepperSpeed = pidTerm_scaled;
+
+  last_error = current_error;
+}
+
+
+
 //====================================================
 // end stepper speed machine
 //====================================================
@@ -583,14 +641,6 @@ void RelayMachine(void){
 }
 //====================================================
 // end relay machine
-//====================================================
-
-//====================================================
-// stepper machine
-//====================================================
-
-//====================================================
-// end stepper machine
 //====================================================
 
 
@@ -696,11 +746,17 @@ void SendJsonMachine(void) {
   jsonPacket.clear();
   jsonMessage = "";
   // send back the global var
-  jsonPacket["stepper_speed"] = stepperSpeed;
+  jsonPacket["stepper_speed"]    = stepperSpeed;
   // send back the global var
-  jsonPacket["stepper_command"] = stepperCommand;
-  jsonPacket["ultrasonic_value"] = ultrasonic_value;
-  jsonPacket["relay_flag"] = relayFlag;
+  jsonPacket["stepper_command"]  = stepperCommand;
+  jsonPacket["ultrasonic_value"] = aveUltrasonicValue;
+  jsonPacket["relay_flag"]       = relayFlag;
+
+  jsonPacket["PID_setpoint"]     = setpoint;
+  jsonPacket["PID_Kp"]           = Kp;
+  jsonPacket["PID_Ki"]           = Ki;
+  jsonPacket["PID_Kd"]           = Kd;
+
   serializeJson(jsonPacket, jsonMessage);
 }
 //====================================================
@@ -726,7 +782,13 @@ void ReceiveJsonMachine(void) {
   // set the value in the shared data for the other core
   xfr_ptr->stepperSpeed = stepperSpeed;
 
-  //stepper1.setMaxSpeed(stepperSpeed);
+  // get the pid values from the tablet
+  setpoint = double(jsonPacket["PID_setpoint"]);
+  Kp       = double(jsonPacket["PID_Kp"]);
+  Ki       = double(jsonPacket["PID_Ki"]);
+  Kd       = double(jsonPacket["PID_Kd"]);
+
+      
 
   // get the value from the tablet packet, global var
   stepperCommand = int(jsonPacket["stepper_command"]);
@@ -763,18 +825,9 @@ void StepperMachine() {
 
     case INIT:
       Serial.println("Initializing Stepper Drivers");
-      sd.resetSettings();
-      sd.clearStatus();
-      // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-      // for most applications, and we find that it usually works well.
-      sd.setDecayMode(HPSDDecayMode::AutoMixed);
-      // Set the current limit. You should change the number here to an appropriate
-      // value for your particular system.
-      sd.setCurrentMilliamps36v4(750);
-      // Set the number of microsteps that correspond to one full step.
-      sd.setStepMode(HPSDStepMode::MicroStep4);
-      // Enable the motor outputs.
+
       sd.enableDriver();
+
       StepperState = RUN;
       stepperDelay = 4; // seconds to let things setttle?
     break;

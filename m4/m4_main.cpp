@@ -169,8 +169,8 @@ void setup() {
   stepper1.begin(Step1Pin, DirPin);
   stepper2.begin(Step2Pin, DirPin);
 
-  stepper1.setAcceleration(6400); 
-  stepper2.setAcceleration(6400); 
+  stepper1.setAcceleration(800); 
+  stepper2.setAcceleration(800); 
   // end stepper setup
 }
 //====================================================

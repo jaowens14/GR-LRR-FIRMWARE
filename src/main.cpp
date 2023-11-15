@@ -84,6 +84,8 @@ int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 volatile int stepperDelay = 0;
+long milliamps = 1000;
+
 //====================================================
 // end stepper definitions
 //====================================================
@@ -328,6 +330,28 @@ Portenta_H7_Timer ITimer(TIM16);
 void setup() {
   digitalWrite(RED_LED, LOW);
 
+  // spi setup for steppers:
+  SPI.begin();
+
+  sd.setChipSelectPin(CSPin);
+  // Give the driver some time to power up.
+  delay(10);
+  // Reset the driver to its default settings and clear latched status
+  // conditions.
+  sd.resetSettings();
+  sd.clearStatus();
+  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
+  // for most applications, and we find that it usually works well.
+  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+  // Set the current limit. You should change the number here to an appropriate
+  // value for your particular system.
+  sd.setCurrentMilliamps36v4(milliamps);
+
+  // Set the number of microsteps that correspond to one full step.
+  sd.setStepMode(HPSDStepMode::MicroStep1);
+  // Enable the motor outputs.
+  //sd.enableDriver();
+
   // initialize m4 core
   bootM4();
 
@@ -398,25 +422,6 @@ void setup() {
   pinMode(ULTRASONIC_PIN, INPUT);
 
 
-  // spi setup for steppers:
-  SPI.begin();
-  sd.setChipSelectPin(CSPin);
-  // Give the driver some time to power up.
-  delay(10);
-  // Reset the driver to its default settings and clear latched status
-  // conditions.
-  sd.resetSettings();
-  sd.clearStatus();
-  // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-  // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::AutoMixed);
-  // Set the current limit. You should change the number here to an appropriate
-  // value for your particular system.
-  sd.setCurrentMilliamps36v4(750);
-  // Set the number of microsteps that correspond to one full step.
-  sd.setStepMode(HPSDStepMode::MicroStep4);
-  // Enable the motor outputs.
-  sd.enableDriver();
 
 }
 //====================================================
@@ -820,6 +825,12 @@ void StepperMachine() {
 
     case INIT:
       Serial.println("Initializing Stepper Drivers");
+      delay(500);
+      sd.setChipSelectPin(CSPin);
+      // Give the driver some time to power up.
+      delay(10);
+      // Reset the driver to its default settings and clear latched status
+      // conditions.
       sd.resetSettings();
       sd.clearStatus();
       // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
@@ -827,11 +838,13 @@ void StepperMachine() {
       sd.setDecayMode(HPSDDecayMode::AutoMixed);
       // Set the current limit. You should change the number here to an appropriate
       // value for your particular system.
-      sd.setCurrentMilliamps36v4(750);
+      sd.setCurrentMilliamps36v4(milliamps);
+    
       // Set the number of microsteps that correspond to one full step.
-      sd.setStepMode(HPSDStepMode::MicroStep4);
-      // Enable the motor outputs.
+      sd.setStepMode(HPSDStepMode::MicroStep1);
       sd.enableDriver();
+      delay(500);
+
       StepperState = RUN;
       stepperDelay = 4; // seconds to let things setttle?
     break;
