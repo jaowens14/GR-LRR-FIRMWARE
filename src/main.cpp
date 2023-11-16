@@ -77,14 +77,14 @@ byte mac[6];
 #include <SPI.h>
 #include <HighPowerStepperDriver.h>
 
-const uint8_t CSPin = D7;
+const uint8_t CSPin = D13;
 HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 volatile int stepperDelay = 0;
-long milliamps = 1000;
+long milliamps = 1500;
 
 //====================================================
 // end stepper definitions
@@ -342,7 +342,7 @@ void setup() {
   sd.clearStatus();
   // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
   // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+  sd.setDecayMode(HPSDDecayMode::Slow);
   // Set the current limit. You should change the number here to an appropriate
   // value for your particular system.
   sd.setCurrentMilliamps36v4(milliamps);
@@ -835,7 +835,7 @@ void StepperMachine() {
       sd.clearStatus();
       // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
       // for most applications, and we find that it usually works well.
-      sd.setDecayMode(HPSDDecayMode::AutoMixed);
+      sd.setDecayMode(HPSDDecayMode::Slow);
       // Set the current limit. You should change the number here to an appropriate
       // value for your particular system.
       sd.setCurrentMilliamps36v4(milliamps);
