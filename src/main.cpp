@@ -750,6 +750,7 @@ void SendJsonMachine(void) {
   // send back the global var
   jsonPacket["stepper_command"]  = stepperCommand;
   jsonPacket["ultrasonic_value"] = aveUltrasonicValue;
+  jsonPacket["estop"] = estop;
   jsonPacket["relay_flag"]       = relayFlag;
 
   jsonPacket["PID_setpoint"]     = setpoint;
@@ -788,7 +789,7 @@ void ReceiveJsonMachine(void) {
   Ki       = double(jsonPacket["PID_Ki"]);
   Kd       = double(jsonPacket["PID_Kd"]);
 
-      
+  estop = bool(jsonPacket["estop"]);    
 
   // get the value from the tablet packet, global var
   stepperCommand = int(jsonPacket["stepper_command"]);
