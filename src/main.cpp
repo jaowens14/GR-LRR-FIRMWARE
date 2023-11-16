@@ -27,6 +27,7 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 // included libraries
 //====================================================
 #include <Arduino.h>
+#include <math.h>
 //====================================================
 // end included libraries
 //====================================================
@@ -61,6 +62,8 @@ bool wsConnected = false;
 bool wsFlag = 0;
 volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
+
+double uptime = 0.0;
 
 byte mac[6];
 
@@ -465,6 +468,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
+        uptime = uptime + 1.0/60.0;
         //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
@@ -659,7 +663,7 @@ wsClient.poll();
     case WS_DISCONNECTED:
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
-        //delay(1000);
+
         wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
@@ -723,6 +727,7 @@ void onEventsCallback(WebsocketsEvent event, String data) {
     Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
+    uptime = 0.0;
     //delay(2000);
   }
 
@@ -757,6 +762,7 @@ void SendJsonMachine(void) {
   jsonPacket["PID_Kp"]           = Kp;
   jsonPacket["PID_Ki"]           = Ki;
   jsonPacket["PID_Kd"]           = Kd;
+  jsonPacket["uptime"]          = uptime;
 
   serializeJson(jsonPacket, jsonMessage);
 }
