@@ -48,10 +48,10 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 #include <ContinuousStepper.h>
 
 
-const uint8_t Step1Pin = D6;
+const uint8_t Step1Pin = D1;
 const uint8_t Step2Pin = D12;
 
-const uint8_t DirPin = D7;
+const uint8_t DirPin = PC_13;
 
 ContinuousStepper<StepperDriver> stepper1;
 ContinuousStepper<StepperDriver> stepper2;

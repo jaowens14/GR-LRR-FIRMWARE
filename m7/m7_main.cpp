@@ -27,6 +27,7 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 // included libraries
 //====================================================
 #include <Arduino.h>
+#include <math.h>
 //====================================================
 // end included libraries
 //====================================================
@@ -62,6 +63,8 @@ bool wsFlag = 0;
 volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
 
+double uptime = 0.0;
+
 byte mac[6];
 
 //====================================================
@@ -77,14 +80,14 @@ byte mac[6];
 #include <SPI.h>
 #include <HighPowerStepperDriver.h>
 
-const uint8_t CSPin = D7;
+const uint8_t CSPin = D10;
 HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
 int speedMode = 0; // 0 set speed, 1 auto speed
 long stepperSpeed = 0;
 volatile int stepperDelay = 0;
-long milliamps = 1000;
+long milliamps = 1500;
 
 //====================================================
 // end stepper definitions
@@ -144,6 +147,9 @@ bool redLedFlag = false;
 bool blueLedFlag = false;
 volatile int redLedDelay = 0;
 volatile int blueLedDelay = 0;
+
+#define STATE_LED_RED PE_3
+
 //====================================================
 // end led definitions
 //====================================================
@@ -342,7 +348,7 @@ void setup() {
   sd.clearStatus();
   // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
   // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::AutoMixed);
+  sd.setDecayMode(HPSDDecayMode::Slow);
   // Set the current limit. You should change the number here to an appropriate
   // value for your particular system.
   sd.setCurrentMilliamps36v4(milliamps);
@@ -421,7 +427,7 @@ void setup() {
   analogReadResolution(16);
   pinMode(ULTRASONIC_PIN, INPUT);
 
-
+  pinMode(STATE_LED_RED, OUTPUT);
 
 }
 //====================================================
@@ -465,6 +471,8 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
+        digitalWrite(STATE_LED_RED, HIGH);
+        uptime = uptime + 1.0/60.0;
         //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
@@ -474,6 +482,8 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
+        digitalWrite(STATE_LED_RED, LOW);
+
         //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
@@ -659,7 +669,7 @@ wsClient.poll();
     case WS_DISCONNECTED:
       if (!wsReconnectDelay) {
         Serial.println("accepting new");
-        //delay(1000);
+
         wsClient.close();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
@@ -723,6 +733,7 @@ void onEventsCallback(WebsocketsEvent event, String data) {
     Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
+    uptime = 0.0;
     //delay(2000);
   }
 
@@ -750,12 +761,14 @@ void SendJsonMachine(void) {
   // send back the global var
   jsonPacket["stepper_command"]  = stepperCommand;
   jsonPacket["ultrasonic_value"] = aveUltrasonicValue;
+  jsonPacket["estop"] = estop;
   jsonPacket["relay_flag"]       = relayFlag;
 
   jsonPacket["PID_setpoint"]     = setpoint;
   jsonPacket["PID_Kp"]           = Kp;
   jsonPacket["PID_Ki"]           = Ki;
   jsonPacket["PID_Kd"]           = Kd;
+  jsonPacket["uptime"]          = uptime;
 
   serializeJson(jsonPacket, jsonMessage);
 }
@@ -788,7 +801,7 @@ void ReceiveJsonMachine(void) {
   Ki       = double(jsonPacket["PID_Ki"]);
   Kd       = double(jsonPacket["PID_Kd"]);
 
-      
+  estop = bool(jsonPacket["estop"]);    
 
   // get the value from the tablet packet, global var
   stepperCommand = int(jsonPacket["stepper_command"]);
@@ -835,7 +848,7 @@ void StepperMachine() {
       sd.clearStatus();
       // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
       // for most applications, and we find that it usually works well.
-      sd.setDecayMode(HPSDDecayMode::AutoMixed);
+      sd.setDecayMode(HPSDDecayMode::Slow);
       // Set the current limit. You should change the number here to an appropriate
       // value for your particular system.
       sd.setCurrentMilliamps36v4(milliamps);
