@@ -80,7 +80,7 @@ byte mac[6];
 #include <SPI.h>
 #include <HighPowerStepperDriver.h>
 
-const uint8_t CSPin = D10;
+const uint8_t CSPin = D7;
 HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
@@ -148,7 +148,9 @@ bool blueLedFlag = false;
 volatile int redLedDelay = 0;
 volatile int blueLedDelay = 0;
 
-#define STATE_LED_RED PE_3
+#define STATE_LED_RED PE_3      // gpio 4
+#define STATE_LED_YELLOW PG_3   // gpio 5
+#define STATE_LED_GREEN PG_10   // gpio 6
 
 //====================================================
 // end led definitions
@@ -428,6 +430,8 @@ void setup() {
   pinMode(ULTRASONIC_PIN, INPUT);
 
   pinMode(STATE_LED_RED, OUTPUT);
+  pinMode(STATE_LED_YELLOW, OUTPUT);
+  pinMode(STATE_LED_GREEN, OUTPUT);
 
 }
 //====================================================
@@ -472,6 +476,8 @@ void BlueLedMachine() {
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
         digitalWrite(STATE_LED_RED, HIGH);
+        digitalWrite(STATE_LED_YELLOW, HIGH);
+        digitalWrite(STATE_LED_GREEN, HIGH);
         uptime = uptime + 1.0/60.0;
         //Serial.println(String(millis()/1000.0/60.0));
       }
@@ -483,6 +489,8 @@ void BlueLedMachine() {
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
         digitalWrite(STATE_LED_RED, LOW);
+        digitalWrite(STATE_LED_YELLOW, LOW);
+        digitalWrite(STATE_LED_GREEN, LOW);
 
         //Serial.println(String(millis()/1000.0/60.0));
       }
