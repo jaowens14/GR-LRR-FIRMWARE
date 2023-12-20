@@ -138,6 +138,17 @@ double pidTerm_scaled = 0;
 
 
 //====================================================
+// clamp definitions
+//====================================================
+#define CLAMP_PIN D5
+bool clamped = false;
+volatile int clampDelay = 0;
+//====================================================
+// end clamp definitions
+//====================================================
+
+
+//====================================================
 // led definitions
 //====================================================
 #define RED_LED     LEDR
@@ -162,9 +173,9 @@ volatile int blueLedDelay = 0;
 //====================================================
 // relay definitions
 //====================================================
-#define RELAY_PIN 1
-bool relayFlag = false;
-volatile int relayDelay = 0;
+//#define RELAY_PIN 1
+//bool relayFlag = false;
+//volatile int relayDelay = 0;
 bool estop = false;
 //====================================================
 // end relay definitions
@@ -214,7 +225,7 @@ void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
-void RelayMachine(void);
+void ClampMachine(void);
 void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
@@ -261,11 +272,12 @@ enum UltrasonicStates {
 };
 UltrasonicStates UltrasonicState;
 
-enum RelayStates {
-  RELAY_OFF,
-  RELAY_ON
+
+enum ClampStates {
+  CLAMP_DISENGAGED,
+  CLAMP_ENGAGED
 };
-RelayStates RelayState;
+ClampStates ClampState;
 
 enum StepperStates {
   OFF,
@@ -312,8 +324,8 @@ void TimerHandler() {
   if ((interruptCounter % 10000) == 0) {
     if (redLedDelay) redLedDelay--;
     if (wsReconnectDelay) wsReconnectDelay--;
-    if (relayDelay) relayDelay--;
     if (wsDelay) wsDelay--;
+    if (clampDelay) clampDelay--;
   }
 
   // every second
@@ -416,19 +428,14 @@ void setup() {
   // end websocket setup
 
 
-  // stepper setup
-  //stepper1.setMaxSpeed(10000.0);
-  //stepper1.setAcceleration(750000.0);
-  // end stepper setup
-
-  // relay setup
-  RelayState = RELAY_ON;
-
-
   // ultrasonic setup
   analogReadResolution(16);
   pinMode(ULTRASONIC_PIN, INPUT);
 
+  // clamp setup
+  pinMode(CLAMP_PIN, INPUT);
+
+  // state led setup
   pinMode(STATE_LED_RED, OUTPUT);
   pinMode(STATE_LED_YELLOW, OUTPUT);
   pinMode(STATE_LED_GREEN, OUTPUT);
@@ -450,9 +457,9 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
+  ClampMachine();
   StepperSpeedMachine();
   StepperMachine();
-  RelayMachine();
 }
 //====================================================
 // end main loop
@@ -581,6 +588,42 @@ long microsecondsToCentimeters(long microseconds) {
 // end ultrasonic machine
 //====================================================
 
+
+
+//====================================================
+// clamp machine
+//====================================================
+void ClampMachine(void){
+    switch(ClampState) {
+    case CLAMP_DISENGAGED:
+      if (digitalRead(CLAMP_PIN) == 1 && !clampDelay) {
+        ClampState = CLAMP_ENGAGED;
+        clampDelay = 5; // 1/10 seconds
+        clamped = true; // true is engaged
+      
+      }
+      
+
+
+    break;
+    case CLAMP_ENGAGED:
+      if (digitalRead(CLAMP_PIN) == 0 && !clampDelay) {
+        ClampState = CLAMP_DISENGAGED;
+        clampDelay = 5; // 1/10 seconds
+        clamped = false; // false is disengaged
+      }
+
+
+
+    break;
+    default:
+    break;
+  }
+}
+//====================================================
+// end clamp machine
+//====================================================
+
 //====================================================
 // stepper speed machine
 //====================================================
@@ -631,35 +674,6 @@ void StepperPID(void) {
 // end stepper speed machine
 //====================================================
 
-
-//====================================================
-// relay machine
-//====================================================
-void RelayMachine(void){
-  switch(RelayState) {
-    case RELAY_OFF: // relay is off waiting for connection
-      digitalWrite(RELAY_PIN, LOW);
-      if (wsConnected && !estop) {
-        RelayState = RELAY_ON;
-        relayFlag = 1;
-      }
-    break;
-    case RELAY_ON: // relay is on and we are working
-      digitalWrite(RELAY_PIN, HIGH);
-      if (!wsConnected || estop) {
-        RelayState = RELAY_OFF;
-        relayFlag = 0;
-      }
-    break;
-    default:
-    break;
-
-
-  }
-}
-//====================================================
-// end relay machine
-//====================================================
 
 
 
@@ -770,7 +784,7 @@ void SendJsonMachine(void) {
   jsonPacket["stepper_command"]  = stepperCommand;
   jsonPacket["ultrasonic_value"] = aveUltrasonicValue;
   jsonPacket["estop"] = estop;
-  jsonPacket["relay_flag"]       = relayFlag;
+  jsonPacket["relay_flag"]       = estop;
 
   jsonPacket["PID_setpoint"]     = setpoint;
   jsonPacket["PID_Kp"]           = Kp;
@@ -834,19 +848,15 @@ void ReceiveJsonMachine(void) {
 void StepperMachine() {
   switch(StepperState) {
     case OFF:
-      if (wsConnected && !estop) { // if we are connected and the estop is not pressed go to init
+      if (wsConnected && !estop && clamped && !stepperDelay) { // if we are connected and the estop is not pressed go to init
         StepperState = INIT;
       }
 
-      if (!stepperDelay && !wsConnected) {
-        sd.disableDriver();
-        stepperDelay = 2; //seconds 
-      }
     break;
 
     case INIT:
       Serial.println("Initializing Stepper Drivers");
-      delay(500);
+      delay(10);
       sd.setChipSelectPin(CSPin);
       // Give the driver some time to power up.
       delay(10);
@@ -864,19 +874,25 @@ void StepperMachine() {
       // Set the number of microsteps that correspond to one full step.
       sd.setStepMode(HPSDStepMode::MicroStep1);
       sd.enableDriver();
-      delay(500);
+      delay(10);
 
+
+      stepperDelay = 2; // seconds to let things setttle?
+      xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
+      stepperCommand = 0;          // set both to 0
       StepperState = RUN;
-      stepperDelay = 4; // seconds to let things setttle?
+      SendJsonMachine();
     break;
 
     case RUN:
 
-      if (!wsConnected || estop) { // if the websocket is disconnected or the estop is pressed go to off
+      if (!wsConnected || estop || !clamped) { // if the websocket is disconnected or the estop is pressed or the clamp is not engaged go to off
         sd.disableDriver();
         xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
         stepperCommand = 0;          // set both to 0
+        stepperDelay = 2;
         StepperState = OFF;
+        SendJsonMachine();
       }
 
 
