@@ -700,6 +700,8 @@ long voltageToPercent(long voltage) {
   // take half of the distance travelled.
   return voltage * (1.7 / 4095.0);
 }
+
+
 //====================================================
 // end battery machine
 //====================================================
