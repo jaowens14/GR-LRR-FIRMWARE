@@ -189,10 +189,10 @@ void setup() {
   stepper3.begin(Step3Pin, Dir3Pin);
   stepper4.begin(Step4Pin, Dir4Pin);
 //
-  stepper1.setAcceleration(800); 
-  stepper2.setAcceleration(800); 
-  stepper3.setAcceleration(800); 
-  stepper4.setAcceleration(800); 
+  stepper1.setAcceleration(1000); 
+  stepper2.setAcceleration(1000); 
+  stepper3.setAcceleration(1000); 
+  stepper4.setAcceleration(1000); 
 
   // end stepper setup
 }
@@ -242,15 +242,15 @@ void StepperMachine(void) {
 
     break;
     case 1:
-      stepper1.spin(stepperSpeed);
-      stepper2.spin(stepperSpeed);
+      stepper1.spin(-stepperSpeed);
+      stepper2.spin(-stepperSpeed);
       stepper3.spin(stepperSpeed);
       stepper4.spin(stepperSpeed);
 
     break;
     case 2:
-      stepper1.spin(-stepperSpeed);
-      stepper2.spin(-stepperSpeed);
+      stepper1.spin(stepperSpeed);
+      stepper2.spin(stepperSpeed);
       stepper3.spin(-stepperSpeed);
       stepper4.spin(-stepperSpeed);
 

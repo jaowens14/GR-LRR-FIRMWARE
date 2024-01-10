@@ -100,7 +100,7 @@ long milliamps = 1500;
 //====================================================
 // ultrasonic definitions
 //====================================================
-#define ULTRASONIC_PIN A0
+#define ULTRASONIC_PIN A1
 long duration = 0; 
 long distance = 0;
 long ultrasonic_value = 0;
@@ -117,6 +117,26 @@ int ultrasonicSampleNumber = 0;
 //====================================================
 
 
+
+
+//====================================================
+// battery monitor definitions
+//====================================================
+#define BATTERY_PIN A0
+long battery_value = 0;
+volatile int batteryDelay = 0;
+
+double aveBatteryValue = 0;
+const int numBatterySamples = 50;
+long batterySamples[numBatterySamples] = {0};
+int batterySampleNumber = 0;
+//====================================================
+// end battery monitor definitions
+//====================================================
+
+
+
+
 //====================================================
 // PID definitions
 //====================================================
@@ -131,10 +151,24 @@ double changeError = 0;
 double totalError = 0;
 double pidTerm = 0;
 double pidTerm_scaled = 0;
-
 //====================================================
 // end PID definitions
 //====================================================
+
+
+
+
+//====================================================
+// clamp definitions
+//====================================================
+#define CLAMP_PIN D5
+bool clamped = false;
+volatile int clampDelay = 0;
+//====================================================
+// end clamp definitions
+//====================================================
+
+
 
 
 //====================================================
@@ -147,11 +181,6 @@ bool redLedFlag = false;
 bool blueLedFlag = false;
 volatile int redLedDelay = 0;
 volatile int blueLedDelay = 0;
-
-#define STATE_LED_RED PE_3      // gpio 4
-#define STATE_LED_YELLOW PG_3   // gpio 5
-#define STATE_LED_GREEN PG_10   // gpio 6
-
 //====================================================
 // end led definitions
 //====================================================
@@ -160,11 +189,29 @@ volatile int blueLedDelay = 0;
 
 
 //====================================================
+// state led definitions
+//====================================================
+#define STATE_LED_RED PE_3      // gpio 4
+#define STATE_LED_YELLOW PG_3   // gpio 5
+#define STATE_LED_GREEN PG_10   // gpio 6
+volatile int stateLEDDelay1 = 0;
+volatile int stateLEDDelay2 = 0;
+bool stateLEDFlag = false;
+int stateLEDcount = 0;
+bool stateLEDchange = false;
+//====================================================
+// end state led definitions
+//====================================================
+
+
+
+
+//====================================================
 // relay definitions
 //====================================================
-#define RELAY_PIN 1
-bool relayFlag = false;
-volatile int relayDelay = 0;
+//#define RELAY_PIN 1
+//bool relayFlag = false;
+//volatile int relayDelay = 0;
 bool estop = false;
 //====================================================
 // end relay definitions
@@ -214,7 +261,9 @@ void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
-void RelayMachine(void);
+void BatteryMachine(void);
+long voltageToPercent(long);
+void ClampMachine(void);
 void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
@@ -225,6 +274,7 @@ void SendJsonMachine(void);
 void CommandToEnumState(void);
 long microsecondsToCentimeters(long);
 void StepperPID(void);
+void StateLEDMachine(void);
 //====================================================
 // end function prototypes
 //====================================================
@@ -261,11 +311,17 @@ enum UltrasonicStates {
 };
 UltrasonicStates UltrasonicState;
 
-enum RelayStates {
-  RELAY_OFF,
-  RELAY_ON
+enum BatteryStates {
+  BAT_WAITING,
+  BAT_READING
 };
-RelayStates RelayState;
+BatteryStates BatteryState;
+
+enum ClampStates {
+  CLAMP_DISENGAGED,
+  CLAMP_ENGAGED
+};
+ClampStates ClampState;
 
 enum StepperStates {
   OFF,
@@ -275,6 +331,16 @@ enum StepperStates {
 };
 StepperStates StepperState;
 
+
+enum StateLEDStates {
+  IDLE,                // yellow 1 second flash
+  CONNECTED_RUNNING,   // green 2 second 2 flash
+  ESTOP_ACTIVE,        // red constant
+  WS_DOWN,           // red 1/2 second flash
+  ZIGBEE_DOWN          // red 1 second 2 flash
+};
+StateLEDStates StateLEDState;
+StateLEDStates LastStateLEDState;
 
 //====================================================
 // end states
@@ -312,14 +378,18 @@ void TimerHandler() {
   if ((interruptCounter % 10000) == 0) {
     if (redLedDelay) redLedDelay--;
     if (wsReconnectDelay) wsReconnectDelay--;
-    if (relayDelay) relayDelay--;
     if (wsDelay) wsDelay--;
+    if (clampDelay) clampDelay--;
+    if (stateLEDDelay1) stateLEDDelay1--;
+    if (stateLEDDelay2) stateLEDDelay2--;
   }
 
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
     if (stepperDelay) stepperDelay--;
+    if (batteryDelay) batteryDelay--;
+
     interruptCounter = 0;
   }
 
@@ -336,11 +406,20 @@ Portenta_H7_Timer ITimer(TIM16);
 // setup
 //====================================================
 void setup() {
+  // state led setup
+  pinMode(STATE_LED_RED, OUTPUT);
+  pinMode(STATE_LED_YELLOW, OUTPUT);
+  pinMode(STATE_LED_GREEN, OUTPUT);
+
+  digitalWrite(STATE_LED_RED, HIGH);
+  digitalWrite(STATE_LED_YELLOW, HIGH);
+  digitalWrite(STATE_LED_GREEN, HIGH);
+
+
   digitalWrite(RED_LED, LOW);
 
   // spi setup for steppers:
   SPI.begin();
-
   sd.setChipSelectPin(CSPin);
   // Give the driver some time to power up.
   delay(10);
@@ -354,7 +433,6 @@ void setup() {
   // Set the current limit. You should change the number here to an appropriate
   // value for your particular system.
   sd.setCurrentMilliamps36v4(milliamps);
-
   // Set the number of microsteps that correspond to one full step.
   sd.setStepMode(HPSDStepMode::MicroStep1);
   // Enable the motor outputs.
@@ -363,6 +441,7 @@ void setup() {
   // initialize m4 core
   bootM4();
 
+
   // timer setup
   ITimer.attachInterruptInterval(10, TimerHandler); // is thje timer messing with timeout of the websockets connection??????????
   // debug setup
@@ -370,6 +449,9 @@ void setup() {
 
   // wifi setup
   while (!Serial && millis() < 2000);
+
+  //done with steppers, timers, serial configs
+  digitalWrite(STATE_LED_RED, LOW);
 
   
 
@@ -410,29 +492,29 @@ void setup() {
   // end wifi setup
 
 
+  // done and connected with wifi config
+  digitalWrite(STATE_LED_YELLOW, LOW);
+
   // websocket setup
   wsServer.listen(websockets_server_port);
   Serial.println("websocket server listening...");
   // end websocket setup
 
 
-  // stepper setup
-  //stepper1.setMaxSpeed(10000.0);
-  //stepper1.setAcceleration(750000.0);
-  // end stepper setup
-
-  // relay setup
-  RelayState = RELAY_ON;
-
-
   // ultrasonic setup
-  analogReadResolution(16);
+  analogReadResolution(12);
   pinMode(ULTRASONIC_PIN, INPUT);
 
-  pinMode(STATE_LED_RED, OUTPUT);
-  pinMode(STATE_LED_YELLOW, OUTPUT);
-  pinMode(STATE_LED_GREEN, OUTPUT);
+  //battery monitor setup
+  pinMode(BATTERY_PIN, INPUT);
 
+  // clamp setup
+  pinMode(CLAMP_PIN, INPUT);
+  delay(2000);
+  // done with all setup
+  digitalWrite(STATE_LED_GREEN, LOW);
+  
+  StateLEDState = IDLE;
 }
 //====================================================
 // end setup
@@ -450,9 +532,11 @@ void loop() {
   //RedLedMachine();
   WebSocketMachine();
   UltrasonicMachine();
+  BatteryMachine();
+  ClampMachine();
   StepperSpeedMachine();
   StepperMachine();
-  RelayMachine();
+  StateLEDMachine();
 }
 //====================================================
 // end main loop
@@ -475,9 +559,6 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        digitalWrite(STATE_LED_RED, HIGH);
-        digitalWrite(STATE_LED_YELLOW, HIGH);
-        digitalWrite(STATE_LED_GREEN, HIGH);
         uptime = uptime + 1.0/60.0;
         //Serial.println(String(millis()/1000.0/60.0));
       }
@@ -488,10 +569,6 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
-        digitalWrite(STATE_LED_RED, LOW);
-        digitalWrite(STATE_LED_YELLOW, LOW);
-        digitalWrite(STATE_LED_GREEN, LOW);
-
         //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
@@ -540,6 +617,7 @@ void RedLedMachine() {
 
 
 
+
 //====================================================
 // ultrasonic machine
 //====================================================
@@ -551,18 +629,21 @@ void UltrasonicMachine() {
       }
     break;
     case UT_READING:
-      ultrasonic_value = analogRead(ULTRASONIC_PIN);
-      ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonic_value;
+      if (!ultrasonicDelay) {
+        ultrasonic_value = analogRead(ULTRASONIC_PIN);
+        ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonic_value;
 
-      if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
+        if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
 
-      aveUltrasonicValue = 0;
+        aveUltrasonicValue = 0;
 
-      for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
-      aveUltrasonicValue /= numUltrasonicSamples;
+        for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
+        aveUltrasonicValue /= numUltrasonicSamples;
 
-      ultrasonicDelay = 50; // 50/1000 seconds
-      UltrasonicState = UT_WAITING;
+        ultrasonicDelay = 50; // 50/1000 seconds
+        UltrasonicState = UT_WAITING;
+      }
+
     break;
     default:
     break;
@@ -579,6 +660,83 @@ long microsecondsToCentimeters(long microseconds) {
 }
 //====================================================
 // end ultrasonic machine
+//====================================================
+
+//====================================================
+// battery machine
+//====================================================
+void BatteryMachine() {
+  switch(UltrasonicState){
+    case BAT_WAITING:
+      if (!batteryDelay) {
+        BatteryState = BAT_READING;
+      }
+    break;
+    case BAT_READING:
+      if (!batteryDelay) {
+        battery_value = voltageToPercent(analogRead(BATTERY_PIN));
+        batterySamples[batterySampleNumber++] = battery_value;
+
+        if (batterySampleNumber >= numBatterySamples) {batterySampleNumber = 0;}
+
+        aveBatteryValue = 0;
+
+        for(int i=0; i< numBatterySamples; ++i){aveBatteryValue += batterySamples[i];}
+        aveBatteryValue /= numBatterySamples;
+
+        batteryDelay = 2; // 1/10 seconds
+        BatteryState = BAT_WAITING;
+      }
+    break;
+    default:
+    break;
+  }
+}
+
+
+long voltageToPercent(long voltage) {
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the object we
+  // take half of the distance travelled.
+  return voltage * (1.7 / 4095.0);
+}
+
+
+//====================================================
+// end battery machine
+//====================================================
+
+
+
+
+//====================================================
+// clamp machine
+//====================================================
+void ClampMachine(void){
+    switch(ClampState) {
+    case CLAMP_DISENGAGED:
+      if (digitalRead(CLAMP_PIN) == 1 && !clampDelay) {
+        ClampState = CLAMP_ENGAGED;
+        clampDelay = 5; // 1/10 seconds
+        clamped = true; // true is engaged
+      
+      }
+      
+    break;
+    case CLAMP_ENGAGED:
+      if (digitalRead(CLAMP_PIN) == 0 && !clampDelay) {
+        ClampState = CLAMP_DISENGAGED;
+        clampDelay = 5; // 1/10 seconds
+        clamped = false; // false is disengaged
+      }
+
+    break;
+    default:
+    break;
+  }
+}
+//====================================================
+// end clamp machine
 //====================================================
 
 //====================================================
@@ -624,44 +782,82 @@ void StepperPID(void) {
 
   last_error = current_error;
 }
-
-
-
 //====================================================
 // end stepper speed machine
 //====================================================
 
 
+
+
 //====================================================
-// relay machine
+// state LED machine
 //====================================================
-void RelayMachine(void){
-  switch(RelayState) {
-    case RELAY_OFF: // relay is off waiting for connection
-      digitalWrite(RELAY_PIN, LOW);
-      if (wsConnected && !estop) {
-        RelayState = RELAY_ON;
-        relayFlag = 1;
+void StateLEDMachine(void) {
+        // clear leds
+      if (LastStateLEDState != StateLEDState) {
+        digitalWrite(STATE_LED_RED, LOW);
+        digitalWrite(STATE_LED_YELLOW, LOW);
+        digitalWrite(STATE_LED_GREEN, LOW);
+        LastStateLEDState = StateLEDState;
+      }
+    switch(StateLEDState) {
+    case IDLE: // yellow 1 second flash
+      if (!stateLEDDelay1) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay1 = 10;
+        digitalWrite(STATE_LED_YELLOW, stateLEDFlag ? HIGH : LOW);
       }
     break;
-    case RELAY_ON: // relay is on and we are working
-      digitalWrite(RELAY_PIN, HIGH);
-      if (!wsConnected || estop) {
-        RelayState = RELAY_OFF;
-        relayFlag = 0;
+
+    case CONNECTED_RUNNING: // green 2 second 2 flash
+      if (!stateLEDDelay1) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay1 = 2;
+        digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
+        stateLEDcount++;
+        if(stateLEDcount == 4){
+          stateLEDcount = 0;
+          stateLEDDelay1 = 10;
+          stateLEDFlag = false;
+          digitalWrite(STATE_LED_GREEN, LOW);
+        }
       }
     break;
+
+    case ESTOP_ACTIVE: // red constant
+        digitalWrite(STATE_LED_RED, HIGH);
+    break;
+
+    case WS_DOWN: // red 1/2 second flash
+      if (!stateLEDDelay1) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay1 = 5;
+        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
+      }
+    break;
+
+    case ZIGBEE_DOWN: // red 1 second 2 flash
+      if (!stateLEDDelay1) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay1 = 2;
+        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
+        stateLEDcount++;
+        if(stateLEDcount == 4){
+          stateLEDcount = 0;
+          stateLEDDelay1 = 10;
+          stateLEDFlag = false;
+          digitalWrite(STATE_LED_RED,LOW);
+        }
+      }
+    break;
+
     default:
     break;
-
-
   }
 }
 //====================================================
-// end relay machine
+// end state LED machine
 //====================================================
-
-
 
 
 //====================================================
@@ -689,7 +885,7 @@ wsClient.poll();
           wsClient.onEvent(onEventsCallback);
           // change state to connected
           wsState = WS_CONNECTED;
-
+          StateLEDState = CONNECTED_RUNNING;
           Serial.println("Connected!");
           digitalWrite(GREEN_LED, LOW);
           digitalWrite(RED_LED, HIGH);
@@ -701,6 +897,7 @@ wsClient.poll();
     case WS_CONNECTED:
       if (!wsClient.available()) {
         wsState = WS_DISCONNECTED;
+        StateLEDState = WS_DOWN;
         Serial.println("Disconnected!");
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(RED_LED, LOW);
@@ -769,8 +966,9 @@ void SendJsonMachine(void) {
   // send back the global var
   jsonPacket["stepper_command"]  = stepperCommand;
   jsonPacket["ultrasonic_value"] = aveUltrasonicValue;
+  jsonPacket["battery_value"]    = aveBatteryValue;
   jsonPacket["estop"] = estop;
-  jsonPacket["relay_flag"]       = relayFlag;
+  jsonPacket["relay_flag"]       = estop;
 
   jsonPacket["PID_setpoint"]     = setpoint;
   jsonPacket["PID_Kp"]           = Kp;
@@ -834,19 +1032,15 @@ void ReceiveJsonMachine(void) {
 void StepperMachine() {
   switch(StepperState) {
     case OFF:
-      if (wsConnected && !estop) { // if we are connected and the estop is not pressed go to init
+      if (wsConnected && !estop && clamped && !stepperDelay) { // if we are connected and the estop is not pressed go to init
         StepperState = INIT;
       }
 
-      if (!stepperDelay && !wsConnected) {
-        sd.disableDriver();
-        stepperDelay = 2; //seconds 
-      }
     break;
 
     case INIT:
       Serial.println("Initializing Stepper Drivers");
-      delay(500);
+      delay(10);
       sd.setChipSelectPin(CSPin);
       // Give the driver some time to power up.
       delay(10);
@@ -864,19 +1058,25 @@ void StepperMachine() {
       // Set the number of microsteps that correspond to one full step.
       sd.setStepMode(HPSDStepMode::MicroStep1);
       sd.enableDriver();
-      delay(500);
+      delay(10);
 
+
+      stepperDelay = 2; // seconds to let things setttle?
+      xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
+      stepperCommand = 0;          // set both to 0
       StepperState = RUN;
-      stepperDelay = 4; // seconds to let things setttle?
+      SendJsonMachine();
     break;
 
     case RUN:
 
-      if (!wsConnected || estop) { // if the websocket is disconnected or the estop is pressed go to off
+      if (!wsConnected || estop || !clamped) { // if the websocket is disconnected or the estop is pressed or the clamp is not engaged go to off
         sd.disableDriver();
         xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
         stepperCommand = 0;          // set both to 0
+        stepperDelay = 2;
         StepperState = OFF;
+        SendJsonMachine();
       }
 
 
