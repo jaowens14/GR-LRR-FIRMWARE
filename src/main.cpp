@@ -63,7 +63,7 @@ bool wsFlag = 0;
 volatile int wsReconnectDelay = 0;
 volatile int wsDelay = 0;
 
-double uptime = 0.0;
+int uptime = 0;
 
 byte mac[6];
 
@@ -87,8 +87,9 @@ HighPowerStepperDriver sd;
 
 int stepperCommand = 0;
 long stepperSpeed = 0;
+long targetStepperSpeed = 0;
 int stepperMode = 0; // 0 set speed, 1 auto speed
-bool stepperEnable = false; // 0 steppers off, 1 steppers on
+bool stepperEnable = 1; // 0 steppers off, 1 steppers on
 volatile int stepperDelay = 0;
 long milliamps = 500;
 //====================================================
@@ -112,7 +113,7 @@ long current_time = 0;
 
 double aveUltrasonicValue = 0;
 const int numUltrasonicSamples = 20;
-long ultrasonicSamples[numUltrasonicSamples] = {0};
+double ultrasonicSamples[numUltrasonicSamples] = {0};
 int ultrasonicSampleNumber = 0;
 //====================================================
 // end ultrasonic definitions
@@ -128,9 +129,9 @@ int ultrasonicSampleNumber = 0;
 long battery_value = 0;
 volatile int batteryDelay = 0;
 
-double aveBatteryValue = 0;
+int aveBatteryValue = 0;
 const int numBatterySamples = 50;
-long batterySamples[numBatterySamples] = {0};
+int batterySamples[numBatterySamples] = {0};
 int batterySampleNumber = 0;
 //====================================================
 // end battery monitor definitions
@@ -142,7 +143,7 @@ int batterySampleNumber = 0;
 //====================================================
 // PID definitions
 //====================================================
-double setpoint = 4000;
+double setpoint = 0; // target ultrasonic value
 double Kp = 0.1;
 double Ki = 0;
 double Kd = 0;
@@ -153,6 +154,31 @@ double changeError = 0;
 double totalError = 0;
 double pidTerm = 0;
 double pidTerm_scaled = 0;
+volatile int PIDDelay = 0;
+
+
+// P[n] = Kp * e[n]
+// I[n] = Ki * T / 2 * (E[n] + E[n-1]) + i[n-1]
+// D[n] = 2Kd /( 2tau + T) * (E[n] - E[n-1]) + 2tau - T/ 2tau + T * D[n-1]
+
+
+double initMeasurement = 0;      //   ultrasonic sensor reading
+double prevMeasurement = 0;
+double initError = 0;        // diff from setpoint
+double prevError = 0;
+double p = 0; //  proportional term
+double i = 0; // integral term
+double d = 0; // derivative term
+
+double u = 0; // control output
+
+double Kp = 0; // proportional gain
+double Ki = 0; // integral gain
+double Kd = 0; // derivative gain
+
+double T = 0.1; // sampling time constant 1/10 second
+double tau = 0.2; // low pass time constant 2/10 second
+
 //====================================================
 // end PID definitions
 //====================================================
@@ -196,8 +222,7 @@ volatile int blueLedDelay = 0;
 #define STATE_LED_RED PE_3      // gpio 4
 #define STATE_LED_YELLOW PG_3   // gpio 5
 #define STATE_LED_GREEN PG_10   // gpio 6
-volatile int stateLEDDelay1 = 0;
-volatile int stateLEDDelay2 = 0;
+volatile int stateLEDDelay = 0;
 bool stateLEDFlag = false;
 int stateLEDcount = 0;
 bool stateLEDchange = false;
@@ -212,9 +237,9 @@ bool stateLEDchange = false;
 // estop
 //====================================================
 #define ESTOP_PIN D6
-bool estopFlag = false;
+bool estopFlag = 0; // 0 is false
 volatile int estopDelay = 0;
-bool estop = false;
+bool estop = 0;
 //====================================================
 // end estop definitions
 //====================================================
@@ -276,6 +301,7 @@ void SendJsonMachine(void);
 void CommandToEnumState(void);
 long microsecondsToCentimeters(long);
 void StepperPID(void);
+void PID(void);
 void StateLEDMachine(void);
 void EstopMachine(void);
 //====================================================
@@ -336,12 +362,11 @@ StepperStates StepperState;
 
 
 enum StateLEDStates {
-  IDLE,                // yellow 1 second flash
-  CONNECTED_RUNNING,   // green 2 second 2 flash
-  ESTOP_ACTIVE,        // red constant
+  READY,                // green 2 second 2 flash
+  UNSAFE,        // red constant
   WS_DOWN,             // red 1/2 second flash
-  ZIGBEE_DOWN,          // red 1 second 2 flash
-  RESETTING_MOTORS     // flash red and yellow
+  RESETTING_MOTORS,     // flash red and yellow
+  MOTORS_DISABLED
 };
 StateLEDStates StateLEDState;
 StateLEDStates LastStateLEDState;
@@ -392,15 +417,15 @@ void TimerHandler() {
     if (wsReconnectDelay) wsReconnectDelay--;
     if (wsDelay) wsDelay--;
     if (clampDelay) clampDelay--;
-    if (stateLEDDelay1) stateLEDDelay1--;
-    if (stateLEDDelay2) stateLEDDelay2--;
+    if (stateLEDDelay) stateLEDDelay--;
     if (estopDelay) estopDelay--;
+    if (stepperDelay) stepperDelay--;
+    if (PIDDelay) PIDDelay--;
   }
 
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
-    if (stepperDelay) stepperDelay--;
     if (batteryDelay) batteryDelay--;
 
     interruptCounter = 0;
@@ -447,7 +472,7 @@ void setup() {
   sd.clearStatus();
   // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
   // for most applications, and we find that it usually works well.
-  sd.setDecayMode(HPSDDecayMode::Slow);
+  sd.setDecayMode(HPSDDecayMode::Fast);
   // Set the current limit. You should change the number here to an appropriate
   // value for your particular system.
   sd.setCurrentMilliamps36v4(milliamps);
@@ -536,7 +561,7 @@ void setup() {
   // done with all setup
   digitalWrite(STATE_LED_GREEN, LOW);
   
-  StateLEDState = IDLE;
+  StateLEDState = READY;
 }
 //====================================================
 // end setup
@@ -558,7 +583,7 @@ void loop() {
   ClampMachine();
   StepperSpeedMachine();
   StepperMachine();
-  StateLEDMachine();
+  //StateLEDMachine();
   EstopMachine();
 }
 //====================================================
@@ -582,7 +607,7 @@ void BlueLedMachine() {
         blueLedDelay = 1;
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
-        uptime = uptime + 1.0/60.0;
+        uptime = uptime + 1;
         //Serial.println(String(millis()/1000.0/60.0));
       }
     break;
@@ -593,6 +618,10 @@ void BlueLedMachine() {
         BlueLedState = LED_OFF;
         digitalWrite(BLUE_LED, HIGH);
         //Serial.println(String(millis()/1000.0/60.0));
+        Serial.println("stepper speed");
+        Serial.println(stepperSpeed);
+        Serial.println("stepper pid term");
+        Serial.println(pidTerm);
       }
     break;
     default:
@@ -772,9 +801,7 @@ void EstopMachine(void){
       if (!estopDelay && !digitalRead(ESTOP_PIN)) { //estop pin high means there is power on the steppers, estop not pressed
         estop = true; 
         estopDelay = 2;
-        SendJsonMachine();
         EstopState = ACTIVE;
-        StateLEDState = ESTOP_ACTIVE;
       }
       
     break;
@@ -782,7 +809,6 @@ void EstopMachine(void){
       if (!estopDelay && digitalRead(ESTOP_PIN)) {
         estop = false; 
         estopDelay = 2;
-        SendJsonMachine();
         EstopState = INACTIVE;
       }
 
@@ -816,8 +842,11 @@ void StepperSpeedMachine(void) {
         xfr_ptr->stepperSpeed = stepperSpeed;
 
       }
+      if (!PIDDelay) {
       StepperPID();
       xfr_ptr->stepperSpeed = stepperSpeed;
+      PIDDelay = 1; //1/10 seconds
+      }
 
     break;
     default:
@@ -827,17 +856,37 @@ void StepperSpeedMachine(void) {
 }
 
 void StepperPID(void) {
-  current_error= setpoint - aveUltrasonicValue;
+  current_error = setpoint - aveUltrasonicValue;
   
   changeError = current_error - last_error; // derivative term
   totalError += current_error; //accumalate errors to find integral term
   pidTerm = (Kp * current_error) + (Ki * totalError) + (Kd * changeError);//total gain
   pidTerm = constrain(pidTerm, -10000, 10000);//constraining to appropriate value
-  pidTerm_scaled = abs(pidTerm);//make sure it's a positive value
 
-  stepperSpeed = pidTerm_scaled;
+  stepperSpeed = constrain(pidTerm + targetStepperSpeed, 0, 2100);
 
   last_error = current_error;
+}
+
+void PID(void){
+  // compute error
+  initError = setpoint - initMeasurement;
+  
+  // calculate the proportional term
+  p = Kp * initError;
+
+  i = i + 0.5f * Ki * T * (initError + prevError);
+
+  i = constrain(i, -10000.0, 10000.0); // this limits are random right now
+  
+  d = -(2.0 * Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
+  
+  // sum control terms
+  u = p + i + d;
+
+  // store value for next iteration
+  prevError = initError;
+  prevMeasurement = initMeasurement;
 }
 //====================================================
 // end stepper speed machine
@@ -850,69 +899,55 @@ void StepperPID(void) {
 // state LED machine
 //====================================================
 void StateLEDMachine(void) {
-        // clear leds
-      if (LastStateLEDState != StateLEDState) {
-        digitalWrite(STATE_LED_RED, LOW);
-        digitalWrite(STATE_LED_YELLOW, LOW);
-        digitalWrite(STATE_LED_GREEN, LOW);
-        LastStateLEDState = StateLEDState;
-      }
     switch(StateLEDState) {
-    case IDLE: // yellow 1 second flash
-      if (!stateLEDDelay1) {
-        stateLEDFlag = !stateLEDFlag;
-        stateLEDDelay1 = 10;
-        digitalWrite(STATE_LED_YELLOW, stateLEDFlag ? HIGH : LOW);
+    case READY: // yellow 1 second flash
+      if (estop || !clamped) {
+        StateLEDState = UNSAFE;
+      }
+
+      //default, let everything be good
+      stateLEDFlag = !stateLEDFlag;
+      stateLEDDelay = 10;
+      digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
+      stateLEDcount++;
+      if(stateLEDcount == 4){
+        stateLEDcount = 0;
+        stateLEDDelay = 10;
+        stateLEDFlag = false;
+        digitalWrite(STATE_LED_GREEN, LOW);
+      }
+      
+    break;
+
+    case UNSAFE: // red constant
+      digitalWrite(STATE_LED_RED, HIGH);
+
+      if(!stateLEDDelay && wsConnected && !estop && clamped && !stepperDelay && stepperEnable) {
+        StateLEDState = READY;
       }
     break;
 
-    case CONNECTED_RUNNING: // green 2 second 2 flash
-      if (!stateLEDDelay1) {
+    case WS_DOWN: // red 1 second flash
+      if (!stateLEDDelay && !wsConnected) {
         stateLEDFlag = !stateLEDFlag;
-        stateLEDDelay1 = 2;
-        digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
-        stateLEDcount++;
-        if(stateLEDcount == 4){
-          stateLEDcount = 0;
-          stateLEDDelay1 = 10;
-          stateLEDFlag = false;
-          digitalWrite(STATE_LED_GREEN, LOW);
-        }
-      }
-    break;
-
-    case ESTOP_ACTIVE: // red constant
-        digitalWrite(STATE_LED_RED, HIGH);
-    break;
-
-    case WS_DOWN: // red 1/2 second flash
-      if (!stateLEDDelay1) {
-        stateLEDFlag = !stateLEDFlag;
-        stateLEDDelay1 = 5;
+        stateLEDDelay = 10;
         digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
-      }
-    break;
-
-    case ZIGBEE_DOWN: // red 1 second 2 flash
-      if (!stateLEDDelay1) {
-        stateLEDFlag = !stateLEDFlag;
-        stateLEDDelay1 = 2;
-        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
-        stateLEDcount++;
-        if(stateLEDcount == 4){
-          stateLEDcount = 0;
-          stateLEDDelay1 = 10;
-          stateLEDFlag = false;
-          digitalWrite(STATE_LED_RED,LOW);
-        }
       }
     break;
 
     case RESETTING_MOTORS: // red 1 second 2 flash
-      if (!stateLEDDelay1) {
+      if (!stateLEDDelay && wsConnected && !estop && clamped && !stepperDelay && stepperEnable) {
         stateLEDFlag = !stateLEDFlag;
-        stateLEDDelay1 = 2;
+        stateLEDDelay = 10;
         digitalWrite(STATE_LED_YELLOW, stateLEDFlag ? LOW : HIGH);
+        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
+      }
+    break;
+
+    case MOTORS_DISABLED: // red 1/2 second flash
+      if (!stateLEDDelay || !wsConnected || estop || !clamped || !stepperEnable) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay = 10;
         digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
       }
     break;
@@ -944,7 +979,7 @@ wsClient.poll();
         wsClient = wsServer.accept();
         wsConnected = wsClient.available();
 
-        StateLEDState = WS_DOWN;
+        
 
         if (wsConnected){
           // register callback when messages are received
@@ -964,7 +999,6 @@ wsClient.poll();
     case WS_CONNECTED:
       if (!wsClient.available()) {
         wsState = WS_DISCONNECTED;
-        StateLEDState = WS_DOWN;
         Serial.println("Disconnected!");
         digitalWrite(GREEN_LED, HIGH);
         digitalWrite(RED_LED, LOW);
@@ -999,13 +1033,14 @@ void onEventsCallback(WebsocketsEvent event, String data) {
   
   if (event == WebsocketsEvent::ConnectionOpened) {
     Serial.println("Connnection Opened");
+    
   } 
 
   else if (event == WebsocketsEvent::ConnectionClosed) {
     Serial.println(String(millis()/1000));
     Serial.println("Connnection Closed");
     Serial.println(wsClient.getCloseReason());
-    uptime = 0.0;
+    uptime = 0;
     //delay(2000);
   }
 
@@ -1069,7 +1104,8 @@ void ReceiveJsonMachine(void) {
   xfr_ptr->stepperCommand = stepperCommand;
 
   // get and set the value to the local var and to the shared memory space
-  stepperSpeed = long(jsonPacket["stepper_speed"]);
+  stepperSpeed = double(jsonPacket["stepper_speed"]);
+  targetStepperSpeed = double(jsonPacket["stepper_target_speed"]);
   xfr_ptr->stepperSpeed = stepperSpeed;
 
   stepperMode = bool(jsonPacket["stepper_mode"]);
@@ -1104,24 +1140,24 @@ void StepperMachine() {
     case OFF:
       if (wsConnected && !estop && clamped && !stepperDelay && stepperEnable) { // if we are connected and the estop is not pressed go to init
         StepperState = INIT;
-        StateLEDState = RESETTING_MOTORS;
+
       }
 
     break;
 
     case INIT:
       Serial.println("Initializing Stepper Drivers");
-      delay(10);
+      //delay(10);
       sd.setChipSelectPin(CSPin);
       // Give the driver some time to power up.
-      delay(10);
+      delay(1);
       // Reset the driver to its default settings and clear latched status
       // conditions.
       sd.resetSettings();
       sd.clearStatus();
       // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
       // for most applications, and we find that it usually works well.
-      sd.setDecayMode(HPSDDecayMode::Slow);
+      sd.setDecayMode(HPSDDecayMode::Fast);
       // Set the current limit. You should change the number here to an appropriate
       // value for your particular system.
       sd.setCurrentMilliamps36v4(milliamps);
@@ -1129,15 +1165,12 @@ void StepperMachine() {
       // Set the number of microsteps that correspond to one full step.
       sd.setStepMode(HPSDStepMode::MicroStep1);
       sd.enableDriver();
-      delay(10);
-
+      delay(1);
 
       stepperDelay = 2; // seconds to let things setttle?
       xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
       stepperCommand = 0;          // set both to 0
       StepperState = RUN;
-      StateLEDState = IDLE;
-      SendJsonMachine();
     break;
 
     case RUN:
@@ -1147,9 +1180,8 @@ void StepperMachine() {
         sd.disableDriver();
         xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
         stepperCommand = 0;          // set both to 0
-        stepperDelay = 5;
+        stepperDelay = 2;
         StepperState = OFF;
-        SendJsonMachine();
       }
 
 
