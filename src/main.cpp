@@ -126,12 +126,12 @@ int ultrasonicSampleNumber = 0;
 // battery monitor definitions
 //====================================================
 #define BATTERY_PIN A0
-long battery_value = 0;
+double battery_value = 0;
 volatile int batteryDelay = 0;
 
-int aveBatteryValue = 0;
-const int numBatterySamples = 50;
-int batterySamples[numBatterySamples] = {0};
+double aveBatteryValue = 0;
+const int numBatterySamples = 10;
+double batterySamples[numBatterySamples] = {0};
 int batterySampleNumber = 0;
 //====================================================
 // end battery monitor definitions
@@ -172,9 +172,9 @@ double d = 0; // derivative term
 
 double u = 0; // control output
 
-double Kp = 0; // proportional gain
-double Ki = 0; // integral gain
-double Kd = 0; // derivative gain
+// double Kp = 0; // proportional gain
+// double Ki = 0; // integral gain
+// double Kd = 0; // derivative gain
 
 double T = 0.1; // sampling time constant 1/10 second
 double tau = 0.2; // low pass time constant 2/10 second
@@ -289,7 +289,7 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 void UltrasonicMachine(void);
 void BatteryMachine(void);
-long voltageToPercent(long);
+int voltageToPercent(int);
 void ClampMachine(void);
 void StepperSpeedMachine(void);
 void WebSocketMachine(void);
@@ -421,12 +421,12 @@ void TimerHandler() {
     if (estopDelay) estopDelay--;
     if (stepperDelay) stepperDelay--;
     if (PIDDelay) PIDDelay--;
+    if (batteryDelay) batteryDelay--;
   }
 
   // every second
   if ((interruptCounter % 100000) == 0) {
     if (blueLedDelay) blueLedDelay--;
-    if (batteryDelay) batteryDelay--;
 
     interruptCounter = 0;
   }
@@ -718,25 +718,32 @@ long microsecondsToCentimeters(long microseconds) {
 // battery machine
 //====================================================
 void BatteryMachine() {
-  switch(UltrasonicState){
+  switch(BatteryState){
     case BAT_WAITING:
       if (!batteryDelay) {
         BatteryState = BAT_READING;
+        Serial.println("aveBatteryValue");
+        Serial.println(aveBatteryValue);
       }
     break;
     case BAT_READING:
       if (!batteryDelay) {
-        battery_value = voltageToPercent(analogRead(BATTERY_PIN));
+        // 1. double() to change analogRead() units
+        // 2. times 3.1 to scale to max ADC voltage for Portenta
+        // 3. divide by 4096 to convert from the ADC precision 
+        // 4. times 11.0 to scale to original battery voltage - this comes from the voltage divider on the board
+        // overall I think this gets us the battery voltage +/- 0.15 volts
+        battery_value = (double(analogRead(BATTERY_PIN)) * 3.1 / 4096.0) * (11.0);
         batterySamples[batterySampleNumber++] = battery_value;
 
         if (batterySampleNumber >= numBatterySamples) {batterySampleNumber = 0;}
 
-        aveBatteryValue = 0;
+        aveBatteryValue = 0.0;
 
         for(int i=0; i< numBatterySamples; ++i){aveBatteryValue += batterySamples[i];}
-        aveBatteryValue /= numBatterySamples;
+        aveBatteryValue /= double(numBatterySamples);
 
-        batteryDelay = 2; // 1/10 seconds
+        batteryDelay = 2; // 2/10 seconds
         BatteryState = BAT_WAITING;
       }
     break;
@@ -746,11 +753,8 @@ void BatteryMachine() {
 }
 
 
-long voltageToPercent(long voltage) {
-  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
-  // The ping travels out and back, so to find the distance of the object we
-  // take half of the distance travelled.
-  return voltage * (1.7 / 4095.0);
+int voltageToPercent(int voltage) {
+  return voltage / 4095;
 }
 
 
