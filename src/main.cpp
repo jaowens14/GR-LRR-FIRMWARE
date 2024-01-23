@@ -91,7 +91,7 @@ long targetStepperSpeed = 0;
 int stepperMode = 0; // 0 set speed, 1 auto speed
 bool stepperEnable = 1; // 0 steppers off, 1 steppers on
 volatile int stepperDelay = 0;
-long milliamps = 500;
+long milliamps = 5000;
 //====================================================
 // end stepper definitions
 //====================================================
@@ -130,7 +130,7 @@ double battery_value = 0;
 volatile int batteryDelay = 0;
 
 double aveBatteryValue = 0;
-const int numBatterySamples = 10;
+const int numBatterySamples = 20;
 double batterySamples[numBatterySamples] = {0};
 int batterySampleNumber = 0;
 //====================================================
@@ -732,7 +732,7 @@ void BatteryMachine() {
         // 2. times 3.1 to scale to max ADC voltage for Portenta
         // 3. divide by 4096 to convert from the ADC precision 
         // 4. times 11.0 to scale to original battery voltage - this comes from the voltage divider on the board
-        // overall I think this gets us the battery voltage +/- 0.15 volts
+        // overall I think this gets us the battery voltage +/- 0.15
         battery_value = (double(analogRead(BATTERY_PIN)) * 3.1 / 4096.0) * (11.0);
         batterySamples[batterySampleNumber++] = battery_value;
 
