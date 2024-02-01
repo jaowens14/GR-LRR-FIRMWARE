@@ -53,10 +53,15 @@ volatile int testDelay = 0;
 // motor definitions
 //====================================================
 #include <Portenta_H7_PWM.h>
+#include "mbed.h"
 const uint8_t pin_inv = D3;
-const uint8_t pin_D1 = D2;
+//const uint8_t pin_D1 = D2;
 volatile int motorDelay = 0;
+using namespace mbed;
 mbed::PwmOut* pwm   = NULL;
+
+//const uint8_t Dir3Pin = LEDB + 1 + PD_4;  //gpio 2
+
 double wheelDiameter = 0.040; // 0.040 meters
 double wheelSpeed = 0.0; // m/sa
 
@@ -198,6 +203,9 @@ void setup() {
   //attachInterrupt(encoderPin1, incrementEncoder1, RISING);
   //attachInterrupt(encoderPin2, incrementEncoder2, RISING);
 
+  setPWM(pwm, D2, 100000, 0.0);
+
+  
 }
 //====================================================
 // end setup
@@ -290,8 +298,8 @@ void encoderMachine() {
 void motorMachine() {
   motorSpeed = xfr_ptr->motorSpeed;
   motorDirection = xfr_ptr->motorDirection;
-  setPWM(pwm, pin_D1, 10000.0, float(motorSpeed));
-  //motorDirection ? digitalWrite(pin_inv, !direction) : digitalWrite(pin_inv, direction);
+  setPWM(pwm, D2, 10000.0, float(motorSpeed)); // found that values from roughly 45 to 85 are valid, causing movement at 10khz
+  motorDirection ? digitalWrite(pin_inv, !direction) : digitalWrite(pin_inv, direction);
   }
 //====================================================
 // end motor machine
