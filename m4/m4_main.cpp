@@ -1,5 +1,5 @@
 //====================================================
-// title block
+// TITLE BLOCK
 //====================================================
 /*  
  *  Author: Jacob Owens - Avid Product Development
@@ -7,7 +7,12 @@
  *  Date: 08082023
  */
 //====================================================
-// end title block
+// END TITLE BLOCK
+//====================================================
+
+
+//====================================================
+// INITIALIZATION AND VARIABLES
 //====================================================
 
 
@@ -15,10 +20,10 @@
 // shared data
 //====================================================
 struct shared_data {
-  long stepperSpeed = 0; // buffer
-  int stepperCommand = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
-  bool estopState = 0;         // estop state : 0 = no emergency, 1 = emergency 
-};                        // estop state : 0 = sd.Enabled(), 1 = sd.Disabled()
+  long motorSpeed = 0;    // speed from PID control
+  long measuredMotorSpeed = 0;   // speed from encoders
+  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+};
 volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // end shared data
@@ -29,243 +34,269 @@ volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 // included libraries
 //====================================================
 #include <Arduino.h>
+#include <math.h>
 //====================================================
 // end included libraries
 //====================================================
 
-
 //====================================================
-// wifi and websockets definitions
+// timing debug
 //====================================================
+bool testState = false;
+volatile int testDelay = 0;
 //====================================================
-// end wifi and websockets definitions
-//====================================================
-
-
-//====================================================
-// stepper definitions
-//====================================================
-#include <ContinuousStepper.h>
-
-const uint8_t Step1Pin = D1;
-const uint8_t Step2Pin = D2;
-const uint8_t Step3Pin = D3;
-const uint8_t Step4Pin = D4;
-
-const uint8_t Dir1Pin = LEDB + 1 + PC_13; //gpio 0
-const uint8_t Dir2Pin = LEDB + 1 + PC_15; //gpio 1
-const uint8_t Dir3Pin = LEDB + 1 + PD_4;  //gpio 2
-const uint8_t Dir4Pin = LEDB + 1 + PD_5;  //gpio 3
-
-ContinuousStepper<StepperDriver> stepper1;
-ContinuousStepper<StepperDriver> stepper2;
-ContinuousStepper<StepperDriver> stepper3;
-ContinuousStepper<StepperDriver> stepper4;
-
-int stepperCommand = 0;
-long stepperSpeed = 0;
-//====================================================
-// end stepper definitions
+// end timing debug
 //====================================================
 
 
 //====================================================
-// ultrasonic definitions
+// motor definitions
+//====================================================
+#include <Portenta_H7_PWM.h>
+const uint8_t pin_inv = D3;
+const uint8_t pin_D1 = D2;
+volatile int motorDelay = 0;
+mbed::PwmOut* pwm   = NULL;
+double wheelDiameter = 0.040; // 0.040 meters
+double wheelSpeed = 0.0; // m/sa
+
+long motorSpeed = 0;    // speed from PID control
+long measuredMotorSpeed = 0;   // speed from encoders
+int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+bool direction = LOW;
+//====================================================
+// end motor definitions
+//====================================================
+
+//====================================================
+// encoder definitions
+//====================================================
+const uint8_t encoderPin1 = D0;
+const uint8_t encoderPin2 = D1;
+volatile int encoderDelay = 0;
+bool initEncoderState1 = false;
+bool lastEncoderState1 = false;
+bool initEncoderState2 = false;
+bool lastEncoderState2 = false;
+volatile int  encoderCount1 = 0;
+volatile int  encoderCount2 = 0;
+bool encoderFlag1 = 0;
+bool encoderFlag2 = 0;
+const int encoderRotation = 1120;
+double rotations = 0;
+double speed = 0.0;
+int rotationDuration = 0;
+unsigned long this_time = 0;
+
+
+//====================================================
+// encoder1 timer
+//====================================================
+void incrementEncoder1() { 
+  encoderCount1++;  
+}
+//====================================================
+// end encoder1 timer
+//====================================================
+
+//====================================================
+// encoder2 timer
+//====================================================
+void incrementEncoder2() { 
+  encoderCount2++;
+}
+//====================================================
+// end encoder2 timer
 //====================================================
 //====================================================
-// end ultrasonic definitions
+// end encoder definitions
 //====================================================
 
 
 //====================================================
-// led definitions
-//====================================================
-//====================================================
-// end led definitions
-//====================================================
-
-
-
-
-//====================================================
-// relay definitions
-//====================================================
-//====================================================
-// end relay definitions
-//====================================================
-
-
-
-
-//====================================================
-// json definitions
-//====================================================
-//====================================================
-// end json definitions
-//====================================================
-
-
-
-
-//====================================================
-// ip address definitions
-//====================================================
-//====================================================
-// end ip address definitions
+// END INITIALIZATION AND VARIABLES
 //====================================================
 
 
 
 
+//====================================================
+// TIMER AND FUNCTION PROTOTYPES
+//====================================================
 //====================================================
 // function prototypes
 //====================================================
 void setup(void);
 void loop(void);
-void StepperMachine(void);
+void test(void);
+void encoderMachine(void);
+void motorMachine(void);
 //====================================================
 // end function prototypes
 //====================================================
+//====================================================
+// m4 core timer
+//====================================================
+#include "Portenta_H7_TimerInterrupt.h"
+volatile int interruptCounter = 0;
+void m4timer() { 
+  // every 1/10,000 second - 10,000hz - 0.0001 second
+  interruptCounter++;
+
+    if(testDelay) testDelay--;
+  // every 10/10,000 second - 1,000hz - 0.001 second
+  if ((interruptCounter % 10) == 0) { 
+    
+  }
+
+  // every 100/10,000 second - 100hz - 0.01 second
+  if ((interruptCounter % 100) == 0) { 
+    
+  }
+
+  // every 1,000/10,000 second - 10hz - 0.1 second
+  if ((interruptCounter % 1000) == 0) { 
+    
+
+  }
+
+  // every 10,000/10,000 second - 1hz
+  if ((interruptCounter % 10000) == 0) {
+    interruptCounter = 0;
+  }
+
+}
+Portenta_H7_Timer M4Timer(TIM14);
+//====================================================
+// end m4 core timer
+//====================================================
+//====================================================
+// END TIMER AND FUNCTION PROTOTYPES
+//====================================================
 
 
 
 
 //====================================================
-// states
+// MAIN
 //====================================================
-//====================================================
-// end states
-//====================================================
-
-
-
-//====================================================
-// objects
-//====================================================
-//====================================================
-// end objects
-//====================================================
-
-
-
-
-//====================================================
-// timer
-//====================================================
-//====================================================
-// end timer
-//====================================================
-
-
-
-
 //====================================================
 // setup
 //====================================================
 void setup() {
-  // change the pin to use it for motion
-  // Drive the STEP and DIR pins low initially.
-  pinMode(      Step1Pin, OUTPUT);
-  digitalWrite( Step1Pin, LOW);
-  pinMode(      Step2Pin, OUTPUT);
-  digitalWrite( Step2Pin, LOW);
-  pinMode(      Step3Pin, OUTPUT);
-  digitalWrite( Step3Pin, LOW);
-  pinMode(      Step4Pin, OUTPUT);
-  digitalWrite( Step4Pin, LOW);
-//
-  pinMode(      Dir1Pin, OUTPUT);
-  digitalWrite( Dir1Pin, LOW);
-  pinMode(      Dir2Pin, OUTPUT);
-  digitalWrite( Dir2Pin, LOW);
-  pinMode(      Dir3Pin, OUTPUT);
-  digitalWrite( Dir3Pin, LOW);
-  pinMode(      Dir4Pin, OUTPUT);
-  digitalWrite( Dir4Pin, LOW);
+
+  // timer setup
+  M4Timer.attachInterruptInterval(100, m4timer); 
+
+  pinMode(D6, OUTPUT);
 
 
-  stepper1.begin(Step1Pin, Dir1Pin);
-  stepper2.begin(Step2Pin, Dir2Pin);
-  stepper3.begin(Step3Pin, Dir3Pin);
-  stepper4.begin(Step4Pin, Dir4Pin);
-//
-  stepper1.setAcceleration(1000); 
-  stepper2.setAcceleration(1000); 
-  stepper3.setAcceleration(1000); 
-  stepper4.setAcceleration(1000); 
+    // encoder setup
+  pinMode(encoderPin1, INPUT);
+  pinMode(encoderPin2, INPUT);
 
-  // end stepper setup
+  //attachInterrupt(encoderPin1, incrementEncoder1, RISING);
+  //attachInterrupt(encoderPin2, incrementEncoder2, RISING);
+
 }
 //====================================================
 // end setup
 //====================================================
-
-
-
-
 //====================================================
-// main loop
+// loop
 //====================================================
 void loop() {
-  StepperMachine();
+
+  test();
+  //encoderMachine();
+  motorMachine();
+
 }
 //====================================================
-// end main loop
+// end loop
+//====================================================
+
+//====================================================
+// END MAIN
 //====================================================
 
 
 
 
 //====================================================
-// functions
+// FUNCTIONS
 //====================================================
 
-
 //====================================================
-// stepper machine
+// debug test machine
 //====================================================
-void StepperMachine(void) {
-  stepperSpeed = xfr_ptr->stepperSpeed;
-  stepperCommand = xfr_ptr->stepperCommand;
+void test() {
 
-  stepper1.loop();
-  stepper2.loop();
-  stepper3.loop();
-  stepper4.loop();
-  
-  switch(stepperCommand) {
-    case 0:
-      stepper1.stop();
-      stepper2.stop();
-      stepper3.stop();
-      stepper4.stop();
+  if (!testDelay){
+    if (testState){
+      digitalWrite(D6, HIGH);
+    }
+    else {
+      digitalWrite(D6, LOW);  
+    }
 
-    break;
-    case 1:
-      stepper1.spin(-stepperSpeed);
-      stepper2.spin(-stepperSpeed);
-      stepper3.spin(stepperSpeed);
-      stepper4.spin(stepperSpeed);
-
-    break;
-    case 2:
-      stepper1.spin(stepperSpeed);
-      stepper2.spin(stepperSpeed);
-      stepper3.spin(-stepperSpeed);
-      stepper4.spin(-stepperSpeed);
-
-    break;
-    default:
-    break;
+    testDelay = 1;  // sets the countdown timer to 100ms.  
+    testState = !testState;
   }
-  
 }
+
 //====================================================
-// end stepper machine
+// end debug test machine
+//====================================================
+
+//====================================================
+// encoder machine
+//====================================================
+void encoderMachine() {
+  if (!encoderDelay){
+    
+    encoderDelay = 20; //counting 100 herts
+
+      rotations = (double(encoderCount1)/double(encoderRotation)); // fraction of a rotation in 0.01 of a second
+      speed = rotations / 0.01;                                     // the amount of rotation in that 0.01 of a second
+      // V = R*W
+      wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
+      //Serial.println("speed: r/s");                              // rotatations per second
+      //Serial.println(speed);
+//
+      //Serial.println("Wheel speed");
+      //Serial.println(wheelSpeed);
+//
+      //Serial.println("encoder1 count");
+      //Serial.println(encoderCount1);
+
+      encoderCount1 = 0;
+
+
+    }
+  else {
+    
+  }
+}
+
+//====================================================
+// end encoder machine
 //====================================================
 
 
+//====================================================
+// motor machine
+//====================================================
+void motorMachine() {
+  motorSpeed = xfr_ptr->motorSpeed;
+  motorDirection = xfr_ptr->motorDirection;
+  setPWM(pwm, pin_D1, 10000.0, float(motorSpeed));
+  //motorDirection ? digitalWrite(pin_inv, !direction) : digitalWrite(pin_inv, direction);
+  }
+//====================================================
+// end motor machine
+//====================================================
 
 //====================================================
-// end functions
+// END FUNCTIONS
 //====================================================
