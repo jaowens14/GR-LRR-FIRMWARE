@@ -19,12 +19,12 @@
 //====================================================
 // shared data
 //====================================================
-struct shared_data {
-  long motorSpeed = 0;    // speed from PID control
-  long measuredMotorSpeed = 0;   // speed from encoders
-  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
-};
-volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
+//struct shared_data {
+//  long motorSpeed = 0;    // speed from PID control
+//  long measuredMotorSpeed = 0;   // speed from encoders
+//  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+//};
+//volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // end shared data
 //====================================================
@@ -167,12 +167,27 @@ double tau = 0.2; // low pass time constant 2/10 second
 //====================================================
 // motor definitions
 //====================================================
+#include <mbed.h>
+//mbed::PwmOut motorStepPin(PJ_11); // d2
+mbed::PwmOut motorStepPin1(PC_7); // d4
+//mbed::PwmOut motorStepPin2(PG_7); // d3
+
+mbed::PwmOut motorStepPin2(PJ_11);
+
+const uint8_t Dir4Pin = LEDB + 1 + PD_5;  // gpio 3
+//const uint8_t Dir3Pin = LEDB + 1 + PD_4;  // gpio 2 
+
+
+//const uint8_t pin_inv = D3;
 long motorSpeed = 0;        // speed from PID control
 long measuredMotorSpeed = 0;       // speed from encoders
 int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
 double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
+bool direction = false;
+
+
 //====================================================
 // end motor definitions
 //====================================================
@@ -427,7 +442,7 @@ void incrementEncoder2(void);
 void setup() {
 
   // initialize m4 core
-  bootM4();
+  //bootM4();
   // timer setup
   M7Timer.attachInterruptInterval(100, m7timer);
   // debug setup
@@ -500,6 +515,18 @@ void setup() {
 
   // done with all setup
   digitalWrite(STATE_LED_GREEN, LOW);
+
+
+
+  // motor setup
+  motorStepPin1.period_us(100);
+  motorStepPin1.pulsewidth_us(0);
+
+  motorStepPin2.period_us(100);
+  motorStepPin2.pulsewidth_us(0);
+
+    // motor setup
+
   
   StateLEDState = READY;
 
@@ -521,6 +548,7 @@ void loop() {
   //ClampMachine();
   //StateLEDMachine();
   //EstopMachine();
+  motorMachine();
   test();
 }
 //====================================================
@@ -1032,12 +1060,10 @@ void receiveJson(void) {
   // motor stuff 
   // get and set the value to the local var and to the shared memory space
   motorDirection = int(jsonPacket["motorDirection"]);
-  xfr_ptr->motorDirection = motorDirection;
 
   // get and set the value to the local var and to the shared memory space
-  motorSpeed = double(jsonPacket["motorSpeed"]);
-  xfr_ptr->motorSpeed = motorSpeed;
-
+  motorSpeed = long(jsonPacket["motorSpeed"]);
+  Serial.println(motorSpeed);
 
   targetMotorSpeed = double(jsonPacket["targetMotorSpeed"]);
   motorMode = bool(jsonPacket["motorMode"]);
@@ -1144,10 +1170,10 @@ void test() {
 
   if (!testDelay){
     if (testState){
-      digitalWrite(D5, HIGH);    
+      digitalWrite(D6, HIGH);    
     }
     else {
-      digitalWrite(D5, LOW);  
+      digitalWrite(D6, LOW);  
     }
 
     testDelay = 1;  // sets the countdown timer to 100ms.  
@@ -1157,6 +1183,23 @@ void test() {
 
 //====================================================
 // end debug test machine
+//====================================================
+
+
+//====================================================
+// motor machine
+//====================================================
+void motorMachine() {
+
+  motorStepPin1.pulsewidth_us(int(motorSpeed)); // limited to: 40 to 85 roughly
+  motorStepPin2.pulsewidth_us(int(motorSpeed));
+  motorDirection ? digitalWrite(Dir4Pin, !direction) : digitalWrite(Dir4Pin, direction);
+
+
+
+  }
+//====================================================
+// end motor machine
 //====================================================
 
 //====================================================

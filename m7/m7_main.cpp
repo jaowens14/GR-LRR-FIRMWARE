@@ -427,7 +427,7 @@ void incrementEncoder2(void);
 void setup() {
 
   // initialize m4 core
-  bootM4();
+  //bootM4();
   // timer setup
   M7Timer.attachInterruptInterval(100, m7timer);
   // debug setup
