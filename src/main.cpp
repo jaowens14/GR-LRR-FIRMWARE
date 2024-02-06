@@ -168,24 +168,40 @@ double tau = 0.2; // low pass time constant 2/10 second
 // motor definitions
 //====================================================
 #include <mbed.h>
-//mbed::PwmOut motorStepPin(PJ_11); // d2
-mbed::PwmOut motorStepPin1(PC_7); // d4
-//mbed::PwmOut motorStepPin2(PG_7); // d3
 
+mbed::PwmOut motorStepPin1(PK_1);
 mbed::PwmOut motorStepPin2(PJ_11);
+//mbed::Pwmout motorStepPin3(); // tied to steppin4
+mbed::PwmOut motorStepPin4(PC_7); // d4
 
-const uint8_t Dir4Pin = LEDB + 1 + PD_5;  // gpio 3
-//const uint8_t Dir3Pin = LEDB + 1 + PD_4;  // gpio 2 
+const uint8_t DirPin1 = LEDB + 1 + PC_13; // gpio 0
+const uint8_t DirPin2 = LEDB + 1 + PC_15; // gpio 1
+const uint8_t DirPin3 = LEDB + 1 + PD_4; // gpio 2
+const uint8_t DirPin4 = LEDB + 1 + PD_5; // gpio 3
 
 
 //const uint8_t pin_inv = D3;
-long motorSpeed = 0;        // speed from PID control
-long measuredMotorSpeed = 0;       // speed from encoders
+long lastMotorSpeed = 0;
+long motorSpeed = 0;        // speed from PID control, needs to be in meters/second
+long newMotorSpeed = 0;
+
+long finalMotorSpeed = 0;
+long initialMotorSpeed = 0;
+long motorAcceleration = 5; // const set from experience units are %/0.1 sec
+long motorDuration = 0;     // the time needed to accelerate or decelerate 
+long velocityIncrement = 0;
+long measuredMotorSpeed = 0;       // speed from encoder
 int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
+int lastMotorDirection = 0;
 double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
+volatile int motorDelay = 0;
 bool direction = false;
+long currentMotorSpeed = 0;
+long deltaMotorSpeed = 0;
+
+
 
 
 //====================================================
@@ -328,10 +344,12 @@ EstopStates EstopState;
 
 
 enum motorStates {
-   MOTOR_OFF,
-   MOTOR_ON
+   MOTOR_STOPPED,
+   MOTOR_RUNNING,
 };
 motorStates motorState;
+
+
 
 //====================================================
 // end states
@@ -363,6 +381,8 @@ void m7timer() {
 
   // every 100/10,000 second - 100hz - 0.01 second
   if ((interruptCounter % 100) == 0) { 
+
+    if (motorDelay) motorDelay--;
     
   }
 
@@ -419,10 +439,21 @@ void PID(void);
 void StateLEDMachine(void);
 void EstopMachine(void);
 void motorMachine(void);
+void motorSpeedMachine(void);
 void test(void);
 void encoderMachine(void);
 void incrementEncoder1(void);
 void incrementEncoder2(void);
+
+void changeDirection(void);
+void accelerateMotors(void);
+void decelerateMotors(void);
+void stopMotors(void);
+void spinMotors(long); // limit to -100% to 100% duty cycle
+void setMotorsForward(void);
+void setMotorsBackward(void);
+void updateSpeed(void);
+
 //====================================================
 // end function prototypes
 //====================================================
@@ -525,8 +556,18 @@ void setup() {
   motorStepPin2.period_us(100);
   motorStepPin2.pulsewidth_us(0);
 
-    // motor setup
+  motorStepPin4.period_us(100);
+  motorStepPin4.pulsewidth_us(0);
 
+  pinMode(DirPin1, OUTPUT);
+  pinMode(DirPin2, OUTPUT);
+  pinMode(DirPin3, OUTPUT);
+  pinMode(DirPin4, OUTPUT);
+
+  digitalWrite(DirPin1, direction);
+  digitalWrite(DirPin2, direction);
+  digitalWrite(DirPin3, direction);
+  digitalWrite(DirPin4, direction);  
   
   StateLEDState = READY;
 
@@ -549,6 +590,7 @@ void loop() {
   //StateLEDMachine();
   //EstopMachine();
   motorMachine();
+  
   test();
 }
 //====================================================
@@ -759,7 +801,7 @@ void ClampMachine(void){
 // estop machine
 //====================================================
 void EstopMachine(void){
-    switch(EstopState) {
+  switch(EstopState) {
     case INACTIVE:
       if (!estopDelay && !digitalRead(ESTOP_PIN)) { //estop pin high means there is power on the steppers, estop not pressed
         estop = true; 
@@ -1190,17 +1232,138 @@ void test() {
 // motor machine
 //====================================================
 void motorMachine() {
+  switch (motorState) {
+    case MOTOR_STOPPED:
+    //wsConnected && !estop && clamped && 
+      if (motorEnable){
+        motorState = MOTOR_RUNNING;
+      }
+    break;
 
-  motorStepPin1.pulsewidth_us(int(motorSpeed)); // limited to: 40 to 85 roughly
-  motorStepPin2.pulsewidth_us(int(motorSpeed));
-  motorDirection ? digitalWrite(Dir4Pin, !direction) : digitalWrite(Dir4Pin, direction);
+  //!wsConnected || estop || !clamped || 
+    case MOTOR_RUNNING:
+      if(!motorEnable) { // if ws is disconnected, estop is active, clamps is not clamped or motors are disabled: stop
+        motorState = MOTOR_STOPPED;
+      }
 
 
+      // running
+      switch(motorDirection) {
+        case 0:
+        stopMotors();
+        break;
+
+        case 1:
+        spinMotors(motorSpeed);
+        break;
+
+        case 2:
+        spinMotors(-motorSpeed);
+        break;
+
+        default:
+        break;
+      }
+
+    break;
+
+    default:
+    break;
+    }
 
   }
+
+
+void spinMotors(long thisMotorSpeed) {
+  newMotorSpeed = thisMotorSpeed;
+  // set direction forward
+  // if there is a change in direction, set the direction, stop the motors, update last direction, update speed
+  if (lastMotorDirection != motorDirection) {
+    if (newMotorSpeed > 0) {
+      setMotorsForward();
+    }
+
+    // set direction backward
+    else if (newMotorSpeed < 0) {
+      setMotorsBackward();
+    }
+
+    // if requested speed is zero, stop
+    else if (newMotorSpeed == 0) {
+      //stopMotors();
+    }
+
+    else {
+      Serial.println("Error");
+      delay(1000000);
+    }
+    currentMotorSpeed = 0;
+    lastMotorDirection = motorDirection;
+    Serial.println("direction change");
+}
+
+  updateSpeed();
+
+}
+
+
+
+void updateSpeed(void) { 
+
+  if (!motorDelay) { // motor delay is the time between changes, motor duration is the number of those cycles
+    motorDelay = 1; // run at 1 of the 100hz cycles
+
+
+    if (motorDuration){
+      motorDuration--; // decrease and change the speed
+
+      currentMotorSpeed = currentMotorSpeed + (deltaMotorSpeed/abs(deltaMotorSpeed));
+    }
+
+    else {
+      // get overall delta percent
+      motorDuration = abs(motorSpeed - currentMotorSpeed); // 10 cycles
+      deltaMotorSpeed = motorSpeed - currentMotorSpeed;
+    }
+
+
+    motorStepPin4.pulsewidth_us(currentMotorSpeed); // limited to: 40 to 85 roughly
+    motorStepPin2.pulsewidth_us(currentMotorSpeed);
+    motorStepPin1.pulsewidth_us(currentMotorSpeed);
+
+  }
+
+}
+
+
+void stopMotors(void){
+  motorStepPin4.pulsewidth_us(int(0)); // limited to: 40 to 85 roughly
+  motorStepPin2.pulsewidth_us(int(0));
+  motorStepPin1.pulsewidth_us(int(0));
+}
+
+void setMotorsForward(void) {
+  digitalWrite(DirPin1, true);
+  digitalWrite(DirPin2, true);
+  digitalWrite(DirPin3, true);
+  digitalWrite(DirPin4, true);  
+}
+
+void setMotorsBackward(void) {  
+  digitalWrite(DirPin1, false);
+  digitalWrite(DirPin2, false);
+  digitalWrite(DirPin3, false);
+  digitalWrite(DirPin4, false);  
+}
+
+
 //====================================================
 // end motor machine
 //====================================================
+
+
+
+
 
 //====================================================
 // END FUNCTIONS
