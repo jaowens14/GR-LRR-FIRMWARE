@@ -19,12 +19,12 @@
 //====================================================
 // shared data
 //====================================================
-struct shared_data {
-  long motorSpeed = 0;    // speed from PID control
-  long measuredMotorSpeed = 0;   // speed from encoders
-  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
-};
-volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
+//struct shared_data {
+//  long motorSpeed = 0;    // speed from PID control
+//  long measuredMotorSpeed = 0;   // speed from encoders
+//  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
+//};
+//volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
 //====================================================
 // end shared data
 //====================================================
@@ -85,7 +85,7 @@ WebsocketsClient wsClient;
 //====================================================
 
 // old stuff
-// #define EXTRA_STEPPER_ENABLE_PIN D0
+ #define EXTRA_STEPPER_ENABLE_PIN D0
 // const uint8_t CSPin = D7;
 
 //====================================================
@@ -94,13 +94,13 @@ WebsocketsClient wsClient;
 #define ULTRASONIC_PIN A1
 long duration = 0; 
 long distance = 0;
-long ultrasonic_value = 0;
+double ultrasonicValue = 0;
 volatile int ultrasonicDelay = 0;
 bool ultrasonicFlag = 0;
 long current_time = 0;
 
 double aveUltrasonicValue = 0;
-const int numUltrasonicSamples = 20;
+const int numUltrasonicSamples = 50;
 double ultrasonicSamples[numUltrasonicSamples] = {0};
 int ultrasonicSampleNumber = 0;
 //====================================================
@@ -158,7 +158,7 @@ double u = 0; // control output
 // double Ki = 0; // integral gain
 // double Kd = 0; // derivative gain
 double T = 0.1; // sampling time constant 1/10 second
-double tau = 0.2; // low pass time constant 2/10 second
+double tau = 2.0*T; // low pass time constant 2/10 second
 //====================================================
 // end PID definitions
 //====================================================
@@ -167,12 +167,44 @@ double tau = 0.2; // low pass time constant 2/10 second
 //====================================================
 // motor definitions
 //====================================================
-long motorSpeed = 0;        // speed from PID control
-long measuredMotorSpeed = 0;       // speed from encoders
+#include <mbed.h>
+
+mbed::PwmOut motorStepPin1(PK_1);
+mbed::PwmOut motorStepPin2(PJ_11);
+//mbed::Pwmout motorStepPin3(); // tied to steppin4
+mbed::PwmOut motorStepPin4(PC_7); // d4
+
+const uint8_t DirPin1 = LEDB + 1 + PC_13; // gpio 0
+const uint8_t DirPin2 = LEDB + 1 + PC_15; // gpio 1
+const uint8_t DirPin3 = LEDB + 1 + PD_4; // gpio 2
+const uint8_t DirPin4 = LEDB + 1 + PD_5; // gpio 3
+
+
+//const uint8_t pin_inv = D3;
+long lastMotorSpeed = 0;
+long motorSpeed = 0;        // speed from PID control, needs to be in meters/second
+long newMotorSpeed = 0;
+
+long finalMotorSpeed = 0;
+long initialMotorSpeed = 0;
+long motorAcceleration = 5; // const set from experience units are %/0.1 sec
+long motorDuration = 0;     // the time needed to accelerate or decelerate 
+long velocityIncrement = 0;
+long measuredMotorSpeed = 0;       // speed from encoder
 int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
+int lastMotorDirection = 0;
 double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
+volatile int motorDelay = 0;
+bool direction = false;
+long currentMotorSpeed = 0;
+long deltaMotorSpeed = 0;
+volatile int directionDelay = 0;
+
+
+
+
 //====================================================
 // end motor definitions
 //====================================================
@@ -295,13 +327,14 @@ StepperStates StepperState;
 
 
 enum StateLEDStates {
-  READY,                // green 2 second 2 flash
-  UNSAFE,        // red constant
-  WS_DOWN,             // red 1/2 second flash
-  RESETTING_MOTORS,     // flash red and yellow
-  MOTORS_DISABLED
+  // ready for input, Unsafe / error, comms down, active process
+  READY,               // green 1 second flash
+  UNSAFE,              // red 1/2 sec flash
+  WS_DOWN,             // red constant
+  ACTIVE_PROCESS,      // yellow 1 second flash
 };
 StateLEDStates StateLEDState;
+StateLEDStates LastStateLEDState;
 
 
 // this will be high, active if either estop button is pressed
@@ -313,10 +346,12 @@ EstopStates EstopState;
 
 
 enum motorStates {
-   MOTOR_OFF,
-   MOTOR_ON
+   MOTOR_STOPPED,
+   MOTOR_RUNNING,
 };
 motorStates motorState;
+
+
 
 //====================================================
 // end states
@@ -342,12 +377,13 @@ void m7timer() {
   if(testDelay) testDelay--;
   // every 10/10,000 second - 1,000hz - 0.001 second
   if ((interruptCounter % 10) == 0) { 
-    if (ultrasonicDelay) ultrasonicDelay--;
      // this can indicate if something is taking way to long?
   }
 
   // every 100/10,000 second - 100hz - 0.01 second
   if ((interruptCounter % 100) == 0) { 
+    if (ultrasonicDelay) ultrasonicDelay--;
+    if (motorDelay) motorDelay--;
     
   }
 
@@ -404,10 +440,21 @@ void PID(void);
 void StateLEDMachine(void);
 void EstopMachine(void);
 void motorMachine(void);
+void motorSpeedMachine(void);
 void test(void);
 void encoderMachine(void);
 void incrementEncoder1(void);
 void incrementEncoder2(void);
+
+void changeDirection(void);
+void accelerateMotors(void);
+void decelerateMotors(void);
+void stopMotors(void);
+void spinMotors(long); // limit to -100% to 100% duty cycle
+void setMotorsForward(void);
+void setMotorsBackward(void);
+void updateSpeed(void);
+
 //====================================================
 // end function prototypes
 //====================================================
@@ -436,8 +483,8 @@ void setup() {
   // turn red led on for initialization setup
   digitalWrite(RED_LED, LOW);
   // extra stepper pin
-  //pinMode(EXTRA_STEPPER_ENABLE_PIN, OUTPUT);
-  //digitalWrite(EXTRA_STEPPER_ENABLE_PIN, HIGH);
+  pinMode(EXTRA_STEPPER_ENABLE_PIN, OUTPUT);
+  digitalWrite(EXTRA_STEPPER_ENABLE_PIN, HIGH);
 
   // state led setup
   pinMode(STATE_LED_RED, OUTPUT);
@@ -494,12 +541,35 @@ void setup() {
   pinMode(CLAMP_PIN, INPUT);
 
   // estop detect setup
-  //pinMode(ESTOP_PIN, INPUT);
-  pinMode(D5, OUTPUT);
+  pinMode(ESTOP_PIN, INPUT);
+  //pinMode(D5, OUTPUT);
   delay(1000);
 
   // done with all setup
   digitalWrite(STATE_LED_GREEN, LOW);
+
+
+
+  // motor setup
+  motorStepPin1.period_us(100);
+  motorStepPin1.pulsewidth_us(0);
+
+  motorStepPin2.period_us(100);
+  motorStepPin2.pulsewidth_us(0);
+
+  motorStepPin4.period_us(100000);
+  motorStepPin4.pulsewidth_us(0);
+
+
+  pinMode(DirPin1, OUTPUT);
+  pinMode(DirPin2, OUTPUT);
+  pinMode(DirPin3, OUTPUT);
+  pinMode(DirPin4, OUTPUT);
+
+  digitalWrite(DirPin1, direction);
+  digitalWrite(DirPin2, direction);
+  digitalWrite(DirPin3, direction);
+  digitalWrite(DirPin4, direction);  
   
   StateLEDState = READY;
 
@@ -518,10 +588,12 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   BatteryMachine();
-  //ClampMachine();
-  //StateLEDMachine();
-  //EstopMachine();
-  test();
+  ClampMachine();
+  StateLEDMachine();
+  EstopMachine();
+  motorMachine();
+  PID();
+  //test();
 }
 //====================================================
 // end loop
@@ -536,6 +608,30 @@ void loop() {
 //====================================================
 // FUNCTIONS
 //====================================================
+//====================================================
+// debug test machine
+//====================================================
+void test() {
+
+  if (!testDelay){
+    if (testState){
+      digitalWrite(D6, HIGH);    
+    }
+    else {
+      digitalWrite(D6, LOW);  
+    }
+
+    testDelay = 1;  // sets the countdown timer to 100ms.  
+    testState = !testState;
+  }
+}
+
+//====================================================
+// end debug test machine
+//====================================================
+
+
+
 
 //====================================================
 // blue led machine
@@ -548,6 +644,7 @@ void BlueLedMachine() {
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
         uptime = uptime + 1;
+        //motorStepPin4.pulsewidth_us(2000);
       }
     break;
     case LED_ON:
@@ -564,6 +661,8 @@ void BlueLedMachine() {
 //====================================================
 // end blue led machine
 //====================================================
+
+
 
 
 //====================================================
@@ -599,6 +698,7 @@ void RedLedMachine() {
 
 
 
+
 //====================================================
 // ultrasonic machine
 //====================================================
@@ -607,21 +707,35 @@ void UltrasonicMachine() {
     case UT_WAITING:
       if (!ultrasonicDelay) {
         UltrasonicState = UT_READING;
+        //Serial.println("ultrasonic Value");
+        //Serial.println(aveUltrasonicValue);
       }
     break;
     case UT_READING:
       if (!ultrasonicDelay) {
-        ultrasonic_value = analogRead(ULTRASONIC_PIN);
-        ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonic_value;
+        
 
-        if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
+        // 1. double() to change analogRead() units
+        // 2. times 3.1 to scale to max ADC voltage for Portenta
+        // 3. divide by 4096 to convert from the ADC precision 
+        // 4. times 5.0 to scale to original battery voltage - this comes from the voltage divider on the board
+        // overall I think this gets us the battery voltage +/- 0.15
+        ultrasonicValue = (double(analogRead(ULTRASONIC_PIN)) * 3.1 / 4096.0) * (5.0);
 
-        aveUltrasonicValue = 0;
 
-        for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
-        aveUltrasonicValue /= numUltrasonicSamples;
 
-        ultrasonicDelay = 50; // 50/1000 seconds
+        //leaky integrator over rolling ave, gain of 0.1
+        aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.1;
+        //ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonicValue;
+
+        //if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
+
+        //aveUltrasonicValue = 0;
+
+        //for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
+        //aveUltrasonicValue /= numUltrasonicSamples;
+
+        ultrasonicDelay = 25; // 0.25 seconds
         UltrasonicState = UT_WAITING;
       }
 
@@ -696,6 +810,8 @@ int voltageToPercent(int voltage) {
 //====================================================
 
 
+
+
 //====================================================
 // clamp machine
 //====================================================
@@ -727,11 +843,13 @@ void ClampMachine(void){
 //====================================================
 
 
+
+
 //====================================================
 // estop machine
 //====================================================
 void EstopMachine(void){
-    switch(EstopState) {
+  switch(EstopState) {
     case INACTIVE:
       if (!estopDelay && !digitalRead(ESTOP_PIN)) { //estop pin high means there is power on the steppers, estop not pressed
         estop = true; 
@@ -757,141 +875,179 @@ void EstopMachine(void){
 //====================================================
 
 
-//====================================================
-// stepper speed machine
-//====================================================
-//void StepperSpeedMachine(void) {
-//  switch(speedState) {
-//    case SET_MODE:
-//      if (stepperMode) {
-//        Serial.println("Going to auto mode");
-//        speedState = AUTO_MODE;
-//      }
-//
-//    break;
-//    case AUTO_MODE:
-//      if (!stepperMode) {
-//        Serial.println("Going to set mode");
-//        speedState = SET_MODE;
-//        stepperSpeed = 0;
-//        xfr_ptr->stepperSpeed = stepperSpeed;
-//
-//      }
-//      if (!PIDDelay) {
-//      StepperPID();
-//      xfr_ptr->stepperSpeed = stepperSpeed;
-//      PIDDelay = 1; //1/10 seconds
-//      }
-//
-//    break;
-//    default:
-//    break;
-//  }
-//
-//}
-//
-//void StepperPID(void) {
-//  current_error = setpoint - aveUltrasonicValue;
-//  
-//  changeError = current_error - last_error; // derivative term
-//  totalError += current_error; //accumalate errors to find integral term
-//  pidTerm = (Kp * current_error) + (Ki * totalError) + (Kd * changeError);//total gain
-//  pidTerm = constrain(pidTerm, -10000, 10000);//constraining to appropriate value
-//
-//  stepperSpeed = constrain(pidTerm + targetStepperSpeed, 0, 2100);
-//
-//  last_error = current_error;
-//}
-//
-//void PID(void){
-//  // compute error
-//  initError = setpoint - initMeasurement;
-//  
-//  // calculate the proportional term
-//  p = Kp * initError;
-//
-//  i = i + 0.5f * Ki * T * (initError + prevError);
-//
-//  i = constrain(i, -10000.0, 10000.0); // this limits are random right now
-//  
-//  d = -(2.0 * Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
-//  
-//  // sum control terms
-//  u = p + i + d;
-//
-//  // store value for next iteration
-//  prevError = initError;
-//  prevMeasurement = initMeasurement;
-//}
-////====================================================
-//// end stepper speed machine
-////====================================================
 
-//
-////====================================================
-//// state LED machine
-////====================================================
-//void StateLEDMachine(void) {
-//    switch(StateLEDState) {
-//    case READY: // yellow 1 second flash
-//      if (estop || !clamped) {
-//        StateLEDState = UNSAFE;
-//      }
-//
-//      //default, let everything be good
-//      stateLEDFlag = !stateLEDFlag;
-//      stateLEDDelay = 10;
-//      digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
-//      stateLEDcount++;
-//      if(stateLEDcount == 4){
-//        stateLEDcount = 0;
-//        stateLEDDelay = 10;
-//        stateLEDFlag = false;
-//        digitalWrite(STATE_LED_GREEN, LOW);
-//      }
-//      
-//    break;
-//
-//    case UNSAFE: // red constant
-//      digitalWrite(STATE_LED_RED, HIGH);
-//
-//      if(!stateLEDDelay && wsConnected && !estop && clamped && !stepperDelay && stepperEnable) {
-//        StateLEDState = READY;
-//      }
-//    break;
-//
-//    case WS_DOWN: // red 1 second flash
-//      if (!stateLEDDelay && !wsConnected) {
-//        stateLEDFlag = !stateLEDFlag;
-//        stateLEDDelay = 10;
-//        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
-//      }
-//    break;
-//
-//    case RESETTING_MOTORS: // red 1 second 2 flash
-//      if (!stateLEDDelay && wsConnected && !estop && clamped && !stepperDelay && stepperEnable) {
-//        stateLEDFlag = !stateLEDFlag;
-//        stateLEDDelay = 10;
-//        digitalWrite(STATE_LED_YELLOW, stateLEDFlag ? LOW : HIGH);
-//        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
-//      }
-//    break;
-//
-//    case MOTORS_DISABLED: // red 1/2 second flash
-//      if (!stateLEDDelay || !wsConnected || estop || !clamped || !stepperEnable) {
-//        stateLEDFlag = !stateLEDFlag;
-//        stateLEDDelay = 10;
-//        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
-//      }
-//    break;
-//
-//    default:
-//    break;
-//  }
-//}
-////====================================================
-//// end state LED machine
-////====================================================
+
+//====================================================
+// pid machine
+//====================================================
+void PID(void){
+  if (!PIDDelay){
+    PIDDelay = 1;
+    initMeasurement = aveUltrasonicValue;
+    // compute error
+    initError = setpoint - initMeasurement;
+
+    // calculate the proportional term
+    p = Kp * initError;
+
+    i = i + 0.5f * Ki * T * (initError + prevError);
+
+    i = constrain(i, -100.0, 100.0); // these limits are the duty cycle
+
+    d = -(2.0 * Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
+
+    // sum control terms
+    u = constrain(p + i + d, 0.0, 100.0);
+
+
+
+
+  // pid runs all the time but only shows values and changes speed when enabled
+  if (motorMode) {
+    motorSpeed = int(u);
+    Serial.println("u: ");
+    Serial.println(u);
+    Serial.println("motorspeed");
+    Serial.println(motorSpeed);
+  }
+
+
+
+  // store value for next iteration
+  prevError = initError;
+  prevMeasurement = initMeasurement;
+  }
+}
+//====================================================
+// end pid machine
+//====================================================
+
+
+
+//====================================================
+// motor machine
+//====================================================
+void motorMachine() {
+  switch (motorState) {
+    case MOTOR_STOPPED:
+    //wsConnected && !estop && clamped && 
+      if (motorEnable){
+        motorState = MOTOR_RUNNING;
+      }
+    break;
+  //!wsConnected || estop || !clamped || 
+    case MOTOR_RUNNING:
+      if(!motorEnable) { // if ws is disconnected, estop is active, clamps is not clamped or motors are disabled: stop
+        motorState = MOTOR_STOPPED;
+      }
+      // running
+      switch(motorDirection) {
+        case 0:
+        stopMotors();
+        break;
+
+        case 1:
+        //forward
+        spinMotors(motorSpeed);
+        break;
+
+        case 2:
+        // backward
+        spinMotors(-motorSpeed);
+        break;
+
+        default:
+        break;
+      }
+    break;
+
+    default:
+    break;
+    }
+
+  }
+
+
+void spinMotors(long thisMotorSpeed) {
+  newMotorSpeed = thisMotorSpeed;
+  // set direction forward
+  // if there is a change in direction, set the direction, stop the motors, update last direction, update speed
+  if (!currentMotorSpeed) {
+    if (newMotorSpeed > 0) {
+      setMotorsForward();
+      Serial.println("direction change, going forward");
+    }
+
+    // set direction backward
+    else if (newMotorSpeed < 0) {
+      setMotorsBackward();
+      Serial.println("direction change, going backward");
+    }
+
+    else if (newMotorSpeed == 0) {
+      stopMotors();
+    }
+    else {
+      Serial.println("Error");
+      delay(1000000);
+    }
+  }
+
+  updateSpeed();
+
+}
+
+
+
+void updateSpeed(void) { 
+
+  if (!motorDelay) { // motor delay is the time between changes, motor duration is the number of those cycles
+    motorDelay = 1; // run at 1 of the 100hz cycles
+
+    if (motorDuration){
+      motorDuration--; // decrease and change the speed
+      currentMotorSpeed = currentMotorSpeed + (deltaMotorSpeed/abs(deltaMotorSpeed));
+    }
+
+    else {
+      // get overall delta percent
+      motorDuration = abs(newMotorSpeed - currentMotorSpeed); // 10 cycles
+      deltaMotorSpeed = newMotorSpeed - currentMotorSpeed;
+    }
+
+    motorStepPin4.pulsewidth_us(abs(currentMotorSpeed)); // limited to: 40 to 85 roughly
+    motorStepPin2.pulsewidth_us(abs(currentMotorSpeed));
+    motorStepPin1.pulsewidth_us(abs(currentMotorSpeed));
+
+  }
+}
+
+
+void stopMotors(void){
+  motorStepPin4.pulsewidth_us(int(0)); // limited to: 40 to 85 roughly
+  motorStepPin2.pulsewidth_us(int(0));
+  motorStepPin1.pulsewidth_us(int(0));
+}
+
+void setMotorsForward(void) {
+  digitalWrite(DirPin1, false);
+  digitalWrite(DirPin2, false);
+  digitalWrite(DirPin3, false);
+  digitalWrite(DirPin4, false);  
+}
+
+void setMotorsBackward(void) {  
+  digitalWrite(DirPin1, true);
+  digitalWrite(DirPin2, true);
+  digitalWrite(DirPin3, true);
+  digitalWrite(DirPin4, true);  
+}
+
+
+//====================================================
+// end motor machine
+//====================================================
+
 
 
 //====================================================
@@ -1032,12 +1188,10 @@ void receiveJson(void) {
   // motor stuff 
   // get and set the value to the local var and to the shared memory space
   motorDirection = int(jsonPacket["motorDirection"]);
-  xfr_ptr->motorDirection = motorDirection;
 
   // get and set the value to the local var and to the shared memory space
-  motorSpeed = double(jsonPacket["motorSpeed"]);
-  xfr_ptr->motorSpeed = motorSpeed;
-
+  motorSpeed = long(jsonPacket["motorSpeed"]);
+  Serial.println(motorSpeed);
 
   targetMotorSpeed = double(jsonPacket["targetMotorSpeed"]);
   motorMode = bool(jsonPacket["motorMode"]);
@@ -1060,104 +1214,106 @@ void receiveJson(void) {
 //====================================================
 
 
-
-
-////====================================================
-//// stepper machine
-////====================================================
-//void StepperMachine() {
-//  switch(StepperState) {
-//    case OFF:
-//      if (wsConnected && !estop && clamped && !stepperDelay && stepperEnable) { // if we are connected and the estop is not pressed go to init
-//        StepperState = INIT;
-//
-//      }
-//
-//    break;
-//
-//    case INIT:
-//      Serial.println("Initializing Stepper Drivers");
-//      //delay(10);
-//      sd.setChipSelectPin(CSPin);
-//      // Give the driver some time to power up.
-//      delay(1);
-//      // Reset the driver to its default settings and clear latched status
-//      // conditions.
-//      sd.resetSettings();
-//      sd.clearStatus();
-//      // Select auto mixed decay.  TI's DRV8711 documentation recommends this mode
-//      // for most applications, and we find that it usually works well.
-//      sd.setDecayMode(HPSDDecayMode::Fast);
-//      // Set the current limit. You should change the number here to an appropriate
-//      // value for your particular system.
-//      sd.setCurrentMilliamps36v4(milliamps);
-//    
-//      // Set the number of microsteps that correspond to one full step.
-//      sd.setStepMode(HPSDStepMode::MicroStep1);
-//      sd.enableDriver();
-//      delay(1);
-//
-//      stepperDelay = 2; // seconds to let things setttle?
-//      xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
-//      stepperCommand = 0;          // set both to 0
-//      StepperState = RUN;
-//    break;
-//
-//    case RUN:
-//
-//      if (!wsConnected || estop || !clamped || !stepperEnable) { // if the websocket is disconnected or the estop is pressed or the clamp is not engaged  or if the steppers are disabled go to off
-//        Serial.println("DISABLING DRIVERS");
-//        sd.disableDriver();
-//        xfr_ptr->stepperCommand = 0; // set stepper command to 0 to stop motion
-//        stepperCommand = 0;          // set both to 0
-//        stepperDelay = 2;
-//        StepperState = OFF;
-//      }
-//
-//
-//    break;
-//    case ERR:
-//      if (!stepperDelay) {
-//        Serial.println("Steppers are in error");
-//        Serial.print("The stepper error is: ");
-//        Serial.println(sd.readStatus());
-//
-//        StepperState = INIT;
-//        stepperDelay = 2;
-//      }
-//
-//    default:
-//    break;
-//  }
-//}
-//
-//
-////====================================================
-// end stepper machine
+//====================================================
+// state LED machine
 //====================================================
 
+//READY,               // green 1 second flash
+//UNSAFE,              // red 1/2 sec flash
+//WS_DOWN,             // red constant
+//ACTIVE_PROCESS,      // yellow 1 second
 
-//====================================================
-// debug test machine
-//====================================================
-void test() {
+void StateLEDMachine(void) {
 
-  if (!testDelay){
-    if (testState){
-      digitalWrite(D5, HIGH);    
-    }
-    else {
-      digitalWrite(D5, LOW);  
-    }
+  if(LastStateLEDState!=StateLEDState){
+    LastStateLEDState = StateLEDState;
+    digitalWrite(STATE_LED_GREEN, LOW);    
+    digitalWrite(STATE_LED_YELLOW, LOW);
+    digitalWrite(STATE_LED_RED, LOW);    
+  }
 
-    testDelay = 1;  // sets the countdown timer to 100ms.  
-    testState = !testState;
+  // removed || !clamed
+
+  if (estop || !wsConnected) {
+    StateLEDState = UNSAFE;
+  }
+
+  // removed && clamped
+  if (motorMode && !wsConnected && !estop){
+    StateLEDState = WS_DOWN;
+  }
+  
+  if (motorMode && wsConnected && !estop) {
+    StateLEDState = ACTIVE_PROCESS;
+  }
+  
+  if (!motorMode && wsConnected && !estop){
+    StateLEDState = READY;
+  }
+
+  switch(StateLEDState) {
+    case READY: // green 1 second flash
+      if(!stateLEDDelay){
+      stateLEDFlag = !stateLEDFlag;
+      stateLEDDelay = 10;
+      digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
+      Serial.println("READY");
+      }
+    break;
+
+    case UNSAFE: // red 1/2 second flash
+      if (!stateLEDDelay) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay = 2;
+        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
+        Serial.println("UNSAFE");
+      }
+    break;
+
+    case WS_DOWN: // red 1 second flash constant
+      if (!stateLEDDelay) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay = 7;
+        digitalWrite(STATE_LED_RED, stateLEDFlag ? HIGH : LOW);
+        Serial.println("WS down");
+      }
+    break;
+
+    case ACTIVE_PROCESS: // green and yellow flash
+      if (!stateLEDDelay) {
+        stateLEDFlag = !stateLEDFlag;
+        stateLEDDelay = 5;
+        digitalWrite(STATE_LED_GREEN, stateLEDFlag ? HIGH : LOW);
+        digitalWrite(STATE_LED_YELLOW, !stateLEDFlag ? HIGH : LOW);
+        Serial.println("active process");
+      }
+    break;
+
+    default:
+    break;
   }
 }
+//====================================================
+// end state LED machine
+//===================================================
 
-//====================================================
-// end debug test machine
-//====================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 //====================================================
 // END FUNCTIONS

@@ -557,7 +557,10 @@ void setup() {
   motorStepPin2.period_us(100);
   motorStepPin2.pulsewidth_us(0);
 
-  motorStepPin4.period_us(100000);
+
+  //motorStepPin4.period_us(100000);
+
+  motorStepPin4.period_us(100);
   motorStepPin4.pulsewidth_us(0);
 
 
@@ -644,7 +647,7 @@ void BlueLedMachine() {
         BlueLedState = LED_ON;
         digitalWrite(BLUE_LED, LOW);
         uptime = uptime + 1;
-        motorStepPin4.pulsewidth_us(2000);
+        //motorStepPin4.pulsewidth_us(2000);
       }
     break;
     case LED_ON:
@@ -1232,19 +1235,22 @@ void StateLEDMachine(void) {
     digitalWrite(STATE_LED_RED, LOW);    
   }
 
-  if (estop || !clamped || !wsConnected) {
+  // removed || !clamed
+
+  if (estop || !wsConnected) {
     StateLEDState = UNSAFE;
   }
 
-  if (motorMode && clamped && !wsConnected && !estop){
+  // removed && clamped
+  if (motorMode && !wsConnected && !estop){
     StateLEDState = WS_DOWN;
   }
   
-  if (motorMode && clamped && wsConnected && !estop) {
+  if (motorMode && wsConnected && !estop) {
     StateLEDState = ACTIVE_PROCESS;
   }
   
-  if (!motorMode && clamped && wsConnected && !estop){
+  if (!motorMode && wsConnected && !estop){
     StateLEDState = READY;
   }
 
