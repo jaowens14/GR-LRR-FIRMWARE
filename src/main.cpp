@@ -263,6 +263,58 @@ bool estop = 0;
 //====================================================
 
 
+
+
+
+//====================================================
+// encoder definitions
+//====================================================
+const uint8_t encoderPin1 = D0;
+const uint8_t encoderPin2 = D1;
+volatile int encoderDelay = 0;
+bool initEncoderState1 = false;
+bool lastEncoderState1 = false;
+bool initEncoderState2 = false;
+bool lastEncoderState2 = false;
+volatile int  encoderCount1 = 0;
+volatile int  encoderCount2 = 0;
+bool encoderFlag1 = 0;
+bool encoderFlag2 = 0;
+const int encoderRotation = 1120;
+double rotations = 0;
+double speed = 0.0;
+int rotationDuration = 0;
+unsigned long this_time = 0;
+//====================================================
+// end encoder definitions
+//====================================================
+
+//====================================================
+// encoder1 timer
+//====================================================
+void incrementEncoder1() { 
+  encoderCount1++;  
+}
+//====================================================
+// end encoder1 timer
+//====================================================
+
+//====================================================
+// encoder2 timer
+//====================================================
+void incrementEncoder2() { 
+  encoderCount2++;
+}
+//====================================================
+// end encoder2 timer
+//====================================================
+
+
+
+
+
+
+
 //====================================================
 // json definitions
 //====================================================
@@ -924,6 +976,47 @@ void PID(void){
 //====================================================
 // end pid machine
 //====================================================
+
+
+
+
+
+//====================================================
+// encoder machine
+//====================================================
+void encoderMachine() {
+  if (!encoderDelay){
+    
+    encoderDelay = 20; //counting 100 herts
+
+      rotations = (double(encoderCount1)/double(encoderRotation)); // fraction of a rotation in 0.01 of a second
+      speed = rotations / 0.01;                                     // the amount of rotation in that 0.01 of a second
+      // V = R*W
+      wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
+      //Serial.println("speed: r/s");                              // rotatations per second
+      //Serial.println(speed);
+//
+      //Serial.println("Wheel speed");
+      //Serial.println(wheelSpeed);
+//
+      //Serial.println("encoder1 count");
+      //Serial.println(encoderCount1);
+
+      encoderCount1 = 0;
+
+
+    }
+  else {
+    
+  }
+}
+
+//====================================================
+// end encoder machine
+//====================================================
+
+
+
 
 
 
