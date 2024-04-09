@@ -129,7 +129,7 @@ int batterySampleNumber = 0;
 // PID definitions
 //====================================================
 double setpoint = 0; // target ultrasonic value
-double Kp = 0.1;
+double Kp = 0;
 double Ki = 0;
 double Kd = 0;
 
@@ -220,12 +220,13 @@ long motorDuration = 0;     // the time needed to accelerate or decelerate
 //long velocityIncrement = 0;
 double measuredMotorSpeed = 0;       // speed from encoder
 int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
+int currentMotorDirection = 0;
 //int lastMotorDirection = 0;
 //double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
 volatile int motorDelay = 0;
-bool direction = false;
+bool direction = false; // false is forward, true is backward
 double currentMotorSpeed = 0;
 long deltaMotorDutyCycle = 0;
 volatile int directionDelay = 0;
@@ -449,8 +450,10 @@ EstopStates EstopState;
 
 
 enum motorStates {
-   MOTOR_STOPPED,
-   MOTOR_RUNNING,
+  MOTOR_STOPPED,
+  MOTOR_RUNNING, 
+  MOTOR_CHANGING_DIRECTION,
+  MOTOR_ERROR,
 };
 motorStates motorState;
 
@@ -1005,24 +1008,34 @@ void PID(void){
   if (!PIDDelay){
     PIDDelay = 1;
     initMeasurement = ultrasonicDistance;
+
     // compute error
     initError = setpoint - initMeasurement;
+        //Serial.println("init eror");
+    //Serial.println(initError);
 
     // calculate the proportional term
     p = Kp * initError;
 
+    //Serial.println("p");
+    //Serial.println(p);
+
     i = i + 0.5f * Ki * T * (initError + prevError);
 
-    i = constrain(i, -100.0, 100.0); // these limits are the duty cycle
+        //Serial.println("i");
+    //Serial.println(i);
+
+    i = constrain(i, -4.0, 4.0); // these limits are the duty cycle
 
     d = -(2.0 * Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
-
+    //Serial.println("d");
+    //Serial.println(d);
     // sum control terms
-    u = constrain(p + i + d, 0.0, 100.0);
+    u = constrain(p + i + d, 0.0, 4.0); // between the rotations per sec of the motors
 
   // pid runs all the time but only shows values and changes speed when enabled
   if (motorMode) {
-   //motorSpeed = int(u);
+    motorSpeed = u;
     Serial.println("u: ");
     Serial.println(u);
     Serial.println("motorspeed");
@@ -1048,8 +1061,8 @@ void PID(void){
 //====================================================
 void motorPID(struct MotorEncoder *m){
 
-  Serial.print("Error In function ");
-  Serial.println(m->initError);
+  //Serial.print("Error In function ");
+  //Serial.println(m->initError);
 
   m->initMeasurement = m->encoderSpeed;
   // compute error // motor speed is the set point so constant // encoder speed is the measurement
@@ -1134,90 +1147,65 @@ void encoderMachine() {
 // motor machine
 //====================================================
 void motorMachine() {
-  switch (motorState) {
+
+  switch(motorState){
+
     case MOTOR_STOPPED:
-    //wsConnected && !estop && clamped && 
-      if (motorEnable){
-        motorState = MOTOR_RUNNING;
+      //Serial.println("motor stopped");
+      if(motorDirection == 1 || motorDirection == 2) {
+        motorState = MOTOR_CHANGING_DIRECTION;
       }
+      stopMotors();
+  
     break;
-  //!wsConnected || estop || !clamped || 
+
     case MOTOR_RUNNING:
-      if(!motorEnable) { // if ws is disconnected, estop is active, clamps is not clamped or motors are disabled: stop
+      //Serial.println("motor running");
+      if(motorDirection != currentMotorDirection) {
+        currentMotorDirection = motorDirection;
+        motorState = MOTOR_CHANGING_DIRECTION;
+      }
+      updateSpeed();
+
+    break;
+
+    case MOTOR_CHANGING_DIRECTION:
+    //Serial.println("changing direction");
+
+      M1.dutyCycle = 0;
+      M2.dutyCycle = 0;
+      M3.dutyCycle = 0;
+      M4.dutyCycle = 0;
+
+      if (motorDirection == 0) {
+        stopMotors();
         motorState = MOTOR_STOPPED;
       }
-      // running
-      switch(motorDirection) {
-        case 0:
-        stopMotors();
-        break;
 
-        case 1:
-        //forward
-        spinMotors(motorSpeed);
-
-        break;
-
-        case 2:
-        // backward
-        spinMotors(-motorSpeed);
-
-        break;
-
-        default:
-        break;
+      if (motorDirection == 1) { 
+        setMotorsForward();
+        motorState = MOTOR_RUNNING;
       }
+
+      if (motorDirection == 2) {
+        setMotorsBackward();
+        motorState = MOTOR_RUNNING;
+      }
+
+    
     break;
+
+
+    case MOTOR_ERROR:
+
+    break;
+
 
     default:
     break;
-    }
-
   }
-
-
-void spinMotors(double thisMotorSpeed) {
-  newMotorSpeed = thisMotorSpeed;
-  // set direction forward
-  // if there is a change in direction, set the direction, stop the motors, update last direction, update speed
-  if (currentMotorSpeed != newMotorSpeed) {
-    currentMotorSpeed = newMotorSpeed;
-    if (newMotorSpeed > 0) {
-      setMotorsForward();
-      Serial.println("direction change, going forward");
-      M1.dutyCycle = 0; 
-      M2.dutyCycle = 0;
-      M3.dutyCycle = 0;
-      M4.dutyCycle = 0;
-      motorDelay = 10;
-    }
-
-    // set direction backward
-    else if (newMotorSpeed < 0) {
-      setMotorsBackward();
-      Serial.println("direction change, going backward");
-      M1.dutyCycle = 0; 
-      M2.dutyCycle = 0;
-      M3.dutyCycle = 0;
-      M4.dutyCycle = 0;
-      motorDelay = 10;
-    }
-
-    else if (newMotorSpeed == 0.0) {
-      stopMotors();
-    }
-    else {
-      Serial.println("Error");
-      delay(1000000);
-    }
-  }
-
-  updateSpeed();
-
 
 }
-
-
 
 void updateSpeed(void) { 
   if (!motorDelay) { // motor delay is the time between changes, motor duration is the number of those cycles
@@ -1226,7 +1214,6 @@ void updateSpeed(void) {
     motorPID(&M2);
     motorPID(&M3);
     motorPID(&M4);
-
   }
 
   motorStepPin1.pulsewidth_us(abs(M1.dutyCycle)); // limited to: 40 to 85 roughly
@@ -1414,7 +1401,7 @@ void receiveJson(void) {
 
   
   // get the pid values from the tablet
-  setpoint = double(jsonPacket["PID_setpoint"]);
+  setpoint = double(jsonPacket["targetGlueHeight"]);
   Kp       = double(jsonPacket["PID_Kp"]);
   Ki       = double(jsonPacket["PID_Ki"]);
   Kd       = double(jsonPacket["PID_Kd"]);
