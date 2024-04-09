@@ -85,7 +85,7 @@ WebsocketsClient wsClient;
 //====================================================
 
 // old stuff
- #define EXTRA_STEPPER_ENABLE_PIN D0
+// #define EXTRA_STEPPER_ENABLE_PIN D0
 // const uint8_t CSPin = D7;
 
 //====================================================
@@ -100,6 +100,7 @@ bool ultrasonicFlag = 0;
 long current_time = 0;
 
 double aveUltrasonicValue = 0;
+double ultrasonicDistance = 0;
 const int numUltrasonicSamples = 50;
 double ultrasonicSamples[numUltrasonicSamples] = {0};
 int ultrasonicSampleNumber = 0;
@@ -132,19 +133,11 @@ double Kp = 0.1;
 double Ki = 0;
 double Kd = 0;
 
-double last_error = 0;
-double current_error = 0;
-double changeError = 0;
-double totalError = 0;
-double pidTerm = 0;
-double pidTerm_scaled = 0;
 volatile int PIDDelay = 0;
-
 
 // P[n] = Kp * e[n]
 // I[n] = Ki * T / 2 * (E[n] + E[n-1]) + i[n-1]
 // D[n] = 2Kd /( 2tau + T) * (E[n] - E[n-1]) + 2tau - T/ 2tau + T * D[n-1]
-
 
 double initMeasurement = 0;      //   ultrasonic sensor reading
 double prevMeasurement = 0;
@@ -154,13 +147,48 @@ double p = 0; //  proportional term
 double i = 0; // integral term
 double d = 0; // derivative term
 double u = 0; // control output
-// double Kp = 0; // proportional gain
-// double Ki = 0; // integral gain
-// double Kd = 0; // derivative gain
+
 double T = 0.1; // sampling time constant 1/10 second
 double tau = 2.0*T; // low pass time constant 2/10 second
 //====================================================
 // end PID definitions
+//====================================================
+
+
+
+//====================================================
+// Motor PID definitions
+//====================================================
+double M_setSpeed = 0; // target motor speed
+double M_Kp = 5; // proportional gain
+double M_Ki = 10; // integral gain
+double M_Kd = 10; // derivative gain
+
+// P[n] = Kp * e[n]
+// I[n] = Ki * T / 2 * (E[n] + E[n-1]) + i[n-1]
+// D[n] = 2Kd /( 2tau + T) * (E[n] - E[n-1]) + 2tau - T/ 2tau + T * D[n-1]
+
+struct  MotorEncoder {
+  int dutyCycle = 0;
+  double encoderSpeed = 0;
+  double initMeasurement = 0;
+  double prevMeasurement = 0;
+  double initError = 0;
+  double prevError = 0;
+};
+
+struct MotorEncoder M1, M2, M3, M4;
+
+
+double M_p = 0; //  proportional term
+double M_i = 0; // integral term
+double M_d = 0; // derivative term
+double M_u = 0; // control output
+
+double M_T = 0.1; // sampling time constant 1/100 second based on the rate at which the function is executed
+double M_tau = 2.0*M_T; // low pass time constant 2/100 second
+//====================================================
+// end Motor PID definitions
 //====================================================
 
 
@@ -169,10 +197,10 @@ double tau = 2.0*T; // low pass time constant 2/10 second
 //====================================================
 #include <mbed.h>
 
-mbed::PwmOut motorStepPin1(PK_1);
-mbed::PwmOut motorStepPin2(PJ_11);
-//mbed::Pwmout motorStepPin3(); // tied to steppin4
-mbed::PwmOut motorStepPin4(PC_7); // d4
+mbed::PwmOut motorStepPin1(PK_1);  // d1 // connected to driver 1
+mbed::PwmOut motorStepPin2(PJ_11); // d2 // connected to driver 2
+mbed::PwmOut motorStepPin3(PC_6);  // d5 // connected to driver 3
+mbed::PwmOut motorStepPin4(PC_7);  // d4 // connected to driver 4
 
 const uint8_t DirPin1 = LEDB + 1 + PC_13; // gpio 0
 const uint8_t DirPin2 = LEDB + 1 + PC_15; // gpio 1
@@ -181,31 +209,35 @@ const uint8_t DirPin4 = LEDB + 1 + PD_5; // gpio 3
 
 
 //const uint8_t pin_inv = D3;
-long lastMotorSpeed = 0;
-long motorSpeed = 0;        // speed from PID control, needs to be in meters/second
-long newMotorSpeed = 0;
+double lastMotorSpeed = 0;
+double motorSpeed = 0;        // This is the speed set in the tablet in rotations per second
+double newMotorSpeed = 0;
 
-long finalMotorSpeed = 0;
-long initialMotorSpeed = 0;
-long motorAcceleration = 5; // const set from experience units are %/0.1 sec
+//long finalMotorSpeed = 0;
+//long initialMotorSpeed = 0;
+////long motorAcceleration = 5; // const set from experience units are %/0.1 sec
 long motorDuration = 0;     // the time needed to accelerate or decelerate 
-long velocityIncrement = 0;
-long measuredMotorSpeed = 0;       // speed from encoder
+//long velocityIncrement = 0;
+double measuredMotorSpeed = 0;       // speed from encoder
 int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
-int lastMotorDirection = 0;
-double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
+//int lastMotorDirection = 0;
+//double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
 volatile int motorDelay = 0;
 bool direction = false;
-long currentMotorSpeed = 0;
-long deltaMotorSpeed = 0;
+double currentMotorSpeed = 0;
+long deltaMotorDutyCycle = 0;
 volatile int directionDelay = 0;
 
 
+int motorDutyCycle1 = 0;
+int motorDutyCycle2 = 0;
+int motorDutyCycle3 = 0;
+int motorDutyCycle4 = 0;
 
 
-//====================================================
+//==================================================
 // end motor definitions
 //====================================================
 
@@ -213,7 +245,7 @@ volatile int directionDelay = 0;
 //====================================================
 // clamp definitions
 //====================================================
-#define CLAMP_PIN D5
+//#define CLAMP_PIN D5
 bool clamped = false;
 volatile int clampDelay = 0;
 //====================================================
@@ -254,7 +286,7 @@ bool stateLEDchange = false;
 //====================================================
 // estop
 //====================================================
-#define ESTOP_PIN D6
+//#define ESTOP_PIN D6
 bool estopFlag = 0; // 0 is false
 volatile int estopDelay = 0;
 bool estop = 0;
@@ -269,22 +301,23 @@ bool estop = 0;
 //====================================================
 // encoder definitions
 //====================================================
-const uint8_t encoderPin1 = D0;
-const uint8_t encoderPin2 = D1;
+const uint8_t encoderPin3 = D14; // connected to driver 3
+
+const uint8_t encoderPin4 = D13; // connected to driver 4
+
+const uint8_t encoderPin2 = D12; // connected to driver 2
+
+const uint8_t encoderPin1 = D11; // connected to driver 1
+
 volatile int encoderDelay = 0;
-bool initEncoderState1 = false;
-bool lastEncoderState1 = false;
-bool initEncoderState2 = false;
-bool lastEncoderState2 = false;
+
 volatile int  encoderCount1 = 0;
 volatile int  encoderCount2 = 0;
-bool encoderFlag1 = 0;
-bool encoderFlag2 = 0;
+volatile int  encoderCount3 = 0;
+volatile int  encoderCount4 = 0;
+
 const int encoderRotation = 1120;
 double rotations = 0;
-double speed = 0.0;
-int rotationDuration = 0;
-unsigned long this_time = 0;
 //====================================================
 // end encoder definitions
 //====================================================
@@ -309,7 +342,25 @@ void incrementEncoder2() {
 // end encoder2 timer
 //====================================================
 
+//====================================================
+// encoder1 timer
+//====================================================
+void incrementEncoder3() { 
+  encoderCount3++;  
+}
+//====================================================
+// end encoder1 timer
+//====================================================
 
+//====================================================
+// encoder2 timer
+//====================================================
+void incrementEncoder4() { 
+  encoderCount4++;
+}
+//====================================================
+// end encoder2 timer
+//====================================================
 
 
 
@@ -435,7 +486,7 @@ void m7timer() {
   // every 100/10,000 second - 100hz - 0.01 second
   if ((interruptCounter % 100) == 0) { 
     if (ultrasonicDelay) ultrasonicDelay--;
-    if (motorDelay) motorDelay--;
+
     
   }
 
@@ -451,6 +502,8 @@ void m7timer() {
     //if (stepperDelay) stepperDelay--;
     if (PIDDelay) PIDDelay--;
     if (batteryDelay) batteryDelay--;
+    if (encoderDelay) encoderDelay--;
+    if (motorDelay) motorDelay--;
     
 
   }
@@ -474,10 +527,13 @@ void setup(void);
 void loop(void);
 void RedLedMachine(void);
 void BlueLedMachine(void);
+
 void UltrasonicMachine(void);
+double voltagetoDistance(double);
+
 void BatteryMachine(void);
 int voltageToPercent(int);
-void ClampMachine(void);
+//void ClampMachine(void);
 void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
@@ -486,9 +542,10 @@ void StepperMachine(void);
 void receiveJson(void);
 void sendJson(void);
 void CommandToEnumState(void);
-long microsecondsToCentimeters(long);
+//long microsecondsToCentimeters(long);
 void StepperPID(void);
 void PID(void);
+void motorPID(struct MotorEncoder *m);
 void StateLEDMachine(void);
 void EstopMachine(void);
 void motorMachine(void);
@@ -497,12 +554,14 @@ void test(void);
 void encoderMachine(void);
 void incrementEncoder1(void);
 void incrementEncoder2(void);
+void incrementEncoder3(void);
+void incrementEncoder4(void);
 
 void changeDirection(void);
 void accelerateMotors(void);
 void decelerateMotors(void);
 void stopMotors(void);
-void spinMotors(long); // limit to -100% to 100% duty cycle
+void spinMotors(double); // at the rate given by the tablet
 void setMotorsForward(void);
 void setMotorsBackward(void);
 void updateSpeed(void);
@@ -535,8 +594,6 @@ void setup() {
   // turn red led on for initialization setup
   digitalWrite(RED_LED, LOW);
   // extra stepper pin
-  pinMode(EXTRA_STEPPER_ENABLE_PIN, OUTPUT);
-  digitalWrite(EXTRA_STEPPER_ENABLE_PIN, HIGH);
 
   // state led setup
   pinMode(STATE_LED_RED, OUTPUT);
@@ -590,10 +647,10 @@ void setup() {
   pinMode(BATTERY_PIN, INPUT);
 
   // clamp setup
-  pinMode(CLAMP_PIN, INPUT);
+  //pinMode(CLAMP_PIN, INPUT);
 
   // estop detect setup
-  pinMode(ESTOP_PIN, INPUT);
+  //pinMode(ESTOP_PIN, INPUT);
   //pinMode(D5, OUTPUT);
   delay(1000);
 
@@ -609,7 +666,8 @@ void setup() {
   motorStepPin2.period_us(100);
   motorStepPin2.pulsewidth_us(0);
 
-
+  motorStepPin3.period_us(100);
+  motorStepPin3.pulsewidth_us(0);
   //motorStepPin4.period_us(100000);
 
   motorStepPin4.period_us(100);
@@ -628,6 +686,11 @@ void setup() {
   
   StateLEDState = READY;
 
+  attachInterrupt(encoderPin1, incrementEncoder1, RISING);
+  attachInterrupt(encoderPin2, incrementEncoder2, RISING);
+  attachInterrupt(encoderPin3, incrementEncoder3, RISING);
+  attachInterrupt(encoderPin4, incrementEncoder4, RISING);
+
 }
 //====================================================
 // end setup
@@ -643,11 +706,12 @@ void loop() {
   WebSocketMachine();
   UltrasonicMachine();
   BatteryMachine();
-  ClampMachine();
+  //ClampMachine();
   StateLEDMachine();
-  EstopMachine();
+  //EstopMachine();
   motorMachine();
   PID();
+  encoderMachine();
   //test();
 }
 //====================================================
@@ -776,19 +840,15 @@ void UltrasonicMachine() {
         // 4. times 5.0 to scale to original battery voltage - this comes from the voltage divider on the board
         // overall I think this gets us the battery voltage +/- 0.15
         ultrasonicValue = (double(analogRead(ULTRASONIC_PIN)) * 3.1 / 4096.0) * (5.0);
-
+        //4.92v t0 160mm
+        //2.84 to 100mm
 
 
         //leaky integrator over rolling ave, gain of 0.1
         aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.1;
-        //ultrasonicSamples[ultrasonicSampleNumber++] = ultrasonicValue;
 
-        //if (ultrasonicSampleNumber >= numUltrasonicSamples) {ultrasonicSampleNumber = 0;}
+        ultrasonicDistance = voltagetoDistance(aveUltrasonicValue);
 
-        //aveUltrasonicValue = 0;
-
-        //for(int i=0; i< numUltrasonicSamples; ++i){aveUltrasonicValue += ultrasonicSamples[i];}
-        //aveUltrasonicValue /= numUltrasonicSamples;
 
         ultrasonicDelay = 25; // 0.25 seconds
         UltrasonicState = UT_WAITING;
@@ -802,11 +862,17 @@ void UltrasonicMachine() {
 }
 
 
-long microsecondsToCentimeters(long microseconds) {
-  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
-  // The ping travels out and back, so to find the distance of the object we
-  // take half of the distance travelled.
-  return microseconds / 29 / 2;
+double voltagetoDistance(double ultrasonicVoltage) {
+  
+  double ultrasonicDist = 28.986 * ultrasonicVoltage + 17.389;
+
+  if (ultrasonicDist < 30.0 || ultrasonicDist > 300.0){
+    return 9999.0;
+  }
+  else {
+    return ultrasonicDist;
+  }
+
 }
 //====================================================
 // end ultrasonic machine
@@ -870,29 +936,29 @@ int voltageToPercent(int voltage) {
 //====================================================
 // clamp machine
 //====================================================
-void ClampMachine(void){
-    switch(ClampState) {
-    case CLAMP_DISENGAGED:
-      if (digitalRead(CLAMP_PIN) == 1 && !clampDelay) {
-        ClampState = CLAMP_ENGAGED;
-        clampDelay = 5; // 1/10 seconds
-        clamped = true; // true is engaged
-      
-      }
-      
-    break;
-    case CLAMP_ENGAGED:
-      if (digitalRead(CLAMP_PIN) == 0 && !clampDelay) {
-        ClampState = CLAMP_DISENGAGED;
-        clampDelay = 5; // 1/10 seconds
-        clamped = false; // false is disengaged
-      }
-
-    break;
-    default:
-    break;
-  }
-}
+//void ClampMachine(void){
+//    switch(ClampState) {
+//    case CLAMP_DISENGAGED:
+//      if (digitalRead(CLAMP_PIN) == 1 && !clampDelay) {
+//        ClampState = CLAMP_ENGAGED;
+//        clampDelay = 5; // 1/10 seconds
+//        clamped = true; // true is engaged
+//      
+//      }
+//      
+//    break;
+//    case CLAMP_ENGAGED:
+//      if (digitalRead(CLAMP_PIN) == 0 && !clampDelay) {
+//        ClampState = CLAMP_DISENGAGED;
+//        clampDelay = 5; // 1/10 seconds
+//        clamped = false; // false is disengaged
+//      }
+//
+//    break;
+//    default:
+//    break;
+//  }
+//}
 //====================================================
 // end clamp machine
 //====================================================
@@ -903,28 +969,28 @@ void ClampMachine(void){
 //====================================================
 // estop machine
 //====================================================
-void EstopMachine(void){
-  switch(EstopState) {
-    case INACTIVE:
-      if (!estopDelay && !digitalRead(ESTOP_PIN)) { //estop pin high means there is power on the steppers, estop not pressed
-        estop = true; 
-        estopDelay = 2;
-        EstopState = ACTIVE;
-      }
-      
-    break;
-    case ACTIVE:
-      if (!estopDelay && digitalRead(ESTOP_PIN)) {
-        estop = false; 
-        estopDelay = 2;
-        EstopState = INACTIVE;
-      }
-
-    break;
-    default:
-    break;
-  }
-}
+//void EstopMachine(void){
+//  switch(EstopState) {
+//    case INACTIVE:
+//      if (!estopDelay && !digitalRead(ESTOP_PIN)) { //estop pin high means there is power on the steppers, estop not pressed
+//        estop = true; 
+//        estopDelay = 2;
+//        EstopState = ACTIVE;
+//      }
+//      
+//    break;
+//    case ACTIVE:
+//      if (!estopDelay && digitalRead(ESTOP_PIN)) {
+//        estop = false; 
+//        estopDelay = 2;
+//        EstopState = INACTIVE;
+//      }
+//
+//    break;
+//    default:
+//    break;
+//  }
+//}
 //====================================================
 // end estop machine
 //====================================================
@@ -938,7 +1004,7 @@ void EstopMachine(void){
 void PID(void){
   if (!PIDDelay){
     PIDDelay = 1;
-    initMeasurement = aveUltrasonicValue;
+    initMeasurement = ultrasonicDistance;
     // compute error
     initError = setpoint - initMeasurement;
 
@@ -954,12 +1020,9 @@ void PID(void){
     // sum control terms
     u = constrain(p + i + d, 0.0, 100.0);
 
-
-
-
   // pid runs all the time but only shows values and changes speed when enabled
   if (motorMode) {
-    motorSpeed = int(u);
+   //motorSpeed = int(u);
     Serial.println("u: ");
     Serial.println(u);
     Serial.println("motorspeed");
@@ -980,6 +1043,42 @@ void PID(void){
 
 
 
+//====================================================
+// motor pid machine
+//====================================================
+void motorPID(struct MotorEncoder *m){
+
+  Serial.print("Error In function ");
+  Serial.println(m->initError);
+
+  m->initMeasurement = m->encoderSpeed;
+  // compute error // motor speed is the set point so constant // encoder speed is the measurement
+  m->initError = motorSpeed - m->initMeasurement;
+
+  // calculate the proportional term
+  M_p = M_Kp * m->initError;
+
+  M_i = M_i + 0.5f * M_Ki * M_T * (m->initError + m->prevError);
+
+  M_i = constrain(M_i, -100.0, 100.0); // these limits are the duty cycle
+
+  M_d = -(2.0 * M_Kd * (m->initMeasurement-m->prevMeasurement) + (2.0 * M_tau - M_T) * M_d) / (2.0 * M_tau + M_T);
+
+  // sum control terms
+  M_u = constrain(M_p + M_i + M_d, 0.0, 100.0);
+
+  // store value for next iteration
+  m->prevError = m->initError;
+  m->prevMeasurement = m->initMeasurement;
+  m->dutyCycle = M_u; // set duty cycle
+}
+//====================================================
+// end motor pid machine
+//====================================================
+
+
+
+
 
 //====================================================
 // encoder machine
@@ -987,23 +1086,34 @@ void PID(void){
 void encoderMachine() {
   if (!encoderDelay){
     
-    encoderDelay = 20; //counting 100 herts
+    encoderDelay = 5; // 0.1 seconds
 
-      rotations = (double(encoderCount1)/double(encoderRotation)); // fraction of a rotation in 0.01 of a second
-      speed = rotations / 0.01;                                     // the amount of rotation in that 0.01 of a second
+      // fraction of a rotation in 0.01 of a second  
+      // the amount of rotation in that 0.01 of a second    
+      // leaky integrator, gain of 0.1
+      //M1.encoderSpeed += ( (double(encoderCount1) / double(encoderRotation)) / 0.5 - M1.encoderSpeed) * 0.75;
+      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.5 - M1.encoderSpeed)*0.9;
+
       // V = R*W
-      wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
-      //Serial.println("speed: r/s");                              // rotatations per second
-      //Serial.println(speed);
-//
-      //Serial.println("Wheel speed");
-      //Serial.println(wheelSpeed);
-//
-      //Serial.println("encoder1 count");
-      //Serial.println(encoderCount1);
+      //wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
+      //M2.encoderSpeed = (double(encoderCount2)/double(encoderRotation)) / 0.5;
+      //M3.encoderSpeed = (double(encoderCount3)/double(encoderRotation)) / 0.5;
+      //M4.encoderSpeed = (double(encoderCount4)/double(encoderRotation)) / 0.5;
+
+      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.5 - M2.encoderSpeed)*0.9;
+      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.5 - M3.encoderSpeed)*0.9;
+      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.5 - M4.encoderSpeed)*0.9;
+
+      ///Serial.println("encoder counts");
+      ///Serial.println(encoderCount1);
+      ///Serial.println(encoderCount2);
+      ///Serial.println(encoderCount3);
+      ///Serial.println(encoderCount4);
 
       encoderCount1 = 0;
-
+      encoderCount2 = 0;
+      encoderCount3 = 0;
+      encoderCount4 = 0;
 
     }
   else {
@@ -1045,11 +1155,13 @@ void motorMachine() {
         case 1:
         //forward
         spinMotors(motorSpeed);
+
         break;
 
         case 2:
         // backward
         spinMotors(-motorSpeed);
+
         break;
 
         default:
@@ -1064,23 +1176,34 @@ void motorMachine() {
   }
 
 
-void spinMotors(long thisMotorSpeed) {
+void spinMotors(double thisMotorSpeed) {
   newMotorSpeed = thisMotorSpeed;
   // set direction forward
   // if there is a change in direction, set the direction, stop the motors, update last direction, update speed
-  if (!currentMotorSpeed) {
+  if (currentMotorSpeed != newMotorSpeed) {
+    currentMotorSpeed = newMotorSpeed;
     if (newMotorSpeed > 0) {
       setMotorsForward();
       Serial.println("direction change, going forward");
+      M1.dutyCycle = 0; 
+      M2.dutyCycle = 0;
+      M3.dutyCycle = 0;
+      M4.dutyCycle = 0;
+      motorDelay = 10;
     }
 
     // set direction backward
     else if (newMotorSpeed < 0) {
       setMotorsBackward();
       Serial.println("direction change, going backward");
+      M1.dutyCycle = 0; 
+      M2.dutyCycle = 0;
+      M3.dutyCycle = 0;
+      M4.dutyCycle = 0;
+      motorDelay = 10;
     }
 
-    else if (newMotorSpeed == 0) {
+    else if (newMotorSpeed == 0.0) {
       stopMotors();
     }
     else {
@@ -1091,36 +1214,32 @@ void spinMotors(long thisMotorSpeed) {
 
   updateSpeed();
 
+
 }
 
 
 
 void updateSpeed(void) { 
-
   if (!motorDelay) { // motor delay is the time between changes, motor duration is the number of those cycles
-    motorDelay = 1; // run at 1 of the 100hz cycles
-
-    if (motorDuration){
-      motorDuration--; // decrease and change the speed
-      currentMotorSpeed = currentMotorSpeed + (deltaMotorSpeed/abs(deltaMotorSpeed));
-    }
-
-    else {
-      // get overall delta percent
-      motorDuration = abs(newMotorSpeed - currentMotorSpeed); // 10 cycles
-      deltaMotorSpeed = newMotorSpeed - currentMotorSpeed;
-    }
-
-    motorStepPin4.pulsewidth_us(abs(currentMotorSpeed)); // limited to: 40 to 85 roughly
-    motorStepPin2.pulsewidth_us(abs(currentMotorSpeed));
-    motorStepPin1.pulsewidth_us(abs(currentMotorSpeed));
+    motorDelay = 1; // run at 1 of the 10hz cycles
+    motorPID(&M1);
+    motorPID(&M2);
+    motorPID(&M3);
+    motorPID(&M4);
 
   }
+
+  motorStepPin1.pulsewidth_us(abs(M1.dutyCycle)); // limited to: 40 to 85 roughly
+  motorStepPin2.pulsewidth_us(abs(M2.dutyCycle));
+  motorStepPin3.pulsewidth_us(abs(M3.dutyCycle));
+  motorStepPin4.pulsewidth_us(abs(M4.dutyCycle));
+
 }
 
 
 void stopMotors(void){
   motorStepPin4.pulsewidth_us(int(0)); // limited to: 40 to 85 roughly
+  motorStepPin3.pulsewidth_us(int(0));
   motorStepPin2.pulsewidth_us(int(0));
   motorStepPin1.pulsewidth_us(int(0));
 }
@@ -1257,7 +1376,7 @@ void sendJson(void) {
   jsonPacket["PID_Ki"]           = Ki;
   jsonPacket["PID_Kd"]           = Kd;
 
-  jsonPacket["ultrasonicValue"] = aveUltrasonicValue;
+  jsonPacket["ultrasonicValue"] = ultrasonicDistance;
   jsonPacket["batteryLevel"]    = aveBatteryValue;
 
   jsonPacket["estop"] = estop;
@@ -1286,10 +1405,10 @@ void receiveJson(void) {
   motorDirection = int(jsonPacket["motorDirection"]);
 
   // get and set the value to the local var and to the shared memory space
-  motorSpeed = long(jsonPacket["motorSpeed"]);
+  motorSpeed = double(jsonPacket["motorSpeed"]);
   Serial.println(motorSpeed);
 
-  targetMotorSpeed = double(jsonPacket["targetMotorSpeed"]);
+  //targetMotorSpeed = double(jsonPacket["targetMotorSpeed"]);
   motorMode = bool(jsonPacket["motorMode"]);
   motorEnable = bool(jsonPacket["motorEnable"]);
 
@@ -1414,3 +1533,6 @@ void StateLEDMachine(void) {
 //====================================================
 // END FUNCTIONS
 //====================================================
+
+
+
