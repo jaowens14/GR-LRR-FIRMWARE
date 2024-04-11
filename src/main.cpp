@@ -84,6 +84,19 @@ WebsocketsClient wsClient;
 // end wifi and websockets definitions
 //====================================================
 
+
+
+//====================================================
+// vision definitions
+//====================================================
+
+volatile int visionDelay = 0;
+String trajectory = "";
+
+//====================================================
+// end vision definitions
+//====================================================
+
 // old stuff
 // #define EXTRA_STEPPER_ENABLE_PIN D0
 // const uint8_t CSPin = D7;
@@ -128,10 +141,10 @@ int batterySampleNumber = 0;
 //====================================================
 // PID definitions
 //====================================================
-double setpoint = 0; // target ultrasonic value
-double Kp = 0;
-double Ki = 0;
-double Kd = 0;
+double targetGlueHeight = 0; // target ultrasonic value
+double UT_Kp = 0;
+double UT_Ki = 0;
+double UT_Kd = 0;
 
 volatile int PIDDelay = 0;
 
@@ -237,6 +250,7 @@ int motorDutyCycle2 = 0;
 int motorDutyCycle3 = 0;
 int motorDutyCycle4 = 0;
 
+double wheelDiameter = 0.05; // mm
 
 //==================================================
 // end motor definitions
@@ -409,6 +423,13 @@ enum UltrasonicStates {
 };
 UltrasonicStates UltrasonicState;
 
+
+enum visionStates {
+  VISION_WAITING,
+  VISION_READING
+};
+visionStates visionState;
+
 enum BatteryStates {
   BAT_WAITING,
   BAT_READING
@@ -514,6 +535,7 @@ void m7timer() {
   // every 10,000/10,000 second - 1hz
   if ((interruptCounter % 10000) == 0) {
     if (blueLedDelay) blueLedDelay--;
+    if (visionDelay) visionDelay--;
     interruptCounter = 0;
   }
 
@@ -532,6 +554,7 @@ void RedLedMachine(void);
 void BlueLedMachine(void);
 
 void UltrasonicMachine(void);
+double linearToRotational(double);
 double voltagetoDistance(double);
 
 void BatteryMachine(void);
@@ -541,6 +564,9 @@ void StepperSpeedMachine(void);
 void WebSocketMachine(void);
 void onMessageCallback(WebsocketsMessage);
 void onEventsCallback(WebsocketsEvent, String);
+
+void visionMachine(void);
+
 void StepperMachine(void);
 void receiveJson(void);
 void sendJson(void);
@@ -555,6 +581,7 @@ void motorMachine(void);
 void motorSpeedMachine(void);
 void test(void);
 void encoderMachine(void);
+
 void incrementEncoder1(void);
 void incrementEncoder2(void);
 void incrementEncoder3(void);
@@ -606,7 +633,6 @@ void setup() {
   digitalWrite(STATE_LED_RED, HIGH);
   digitalWrite(STATE_LED_YELLOW, HIGH);
   digitalWrite(STATE_LED_GREEN, HIGH);
-
 
 
   //done with steppers, timers, serial configs
@@ -1010,24 +1036,24 @@ void PID(void){
     initMeasurement = ultrasonicDistance;
 
     // compute error
-    initError = setpoint - initMeasurement;
+    initError = targetGlueHeight - initMeasurement;
         //Serial.println("init eror");
     //Serial.println(initError);
 
     // calculate the proportional term
-    p = Kp * initError;
+    p = UT_Kp * initError;
 
     //Serial.println("p");
     //Serial.println(p);
 
-    i = i + 0.5f * Ki * T * (initError + prevError);
+    i = i + 0.5f * UT_Ki * T * (initError + prevError);
 
         //Serial.println("i");
     //Serial.println(i);
 
     i = constrain(i, -4.0, 4.0); // these limits are the duty cycle
 
-    d = -(2.0 * Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
+    d = -(2.0 * UT_Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
     //Serial.println("d");
     //Serial.println(d);
     // sum control terms
@@ -1155,6 +1181,7 @@ void motorMachine() {
       if(motorDirection == 1 || motorDirection == 2) {
         motorState = MOTOR_CHANGING_DIRECTION;
       }
+      
       stopMotors();
   
     break;
@@ -1164,6 +1191,10 @@ void motorMachine() {
       if(motorDirection != currentMotorDirection) {
         currentMotorDirection = motorDirection;
         motorState = MOTOR_CHANGING_DIRECTION;
+        lastMotorSpeed = motorSpeed; // store the current motor speed
+        motorSpeed = 0; // set the speed to zero
+        
+        Serial.println("This should only run once");
       }
       updateSpeed();
 
@@ -1172,26 +1203,29 @@ void motorMachine() {
     case MOTOR_CHANGING_DIRECTION:
     //Serial.println("changing direction");
 
-      M1.dutyCycle = 0;
-      M2.dutyCycle = 0;
-      M3.dutyCycle = 0;
-      M4.dutyCycle = 0;
+      
+
 
       if (motorDirection == 0) {
         stopMotors();
         motorState = MOTOR_STOPPED;
       }
 
-      if (motorDirection == 1) { 
+      if (motorDirection == 1 && measuredMotorSpeed <= 0.01) { 
         setMotorsForward();
+        motorSpeed = lastMotorSpeed; // reinitialize the last speed you were using 
         motorState = MOTOR_RUNNING;
+        Serial.println("going forward now");
       }
 
-      if (motorDirection == 2) {
+      if (motorDirection == 2 && measuredMotorSpeed <= 0.01) {
         setMotorsBackward();
+        motorSpeed = lastMotorSpeed;
         motorState = MOTOR_RUNNING;
+        Serial.println("going backward now");
       }
 
+      updateSpeed(); // continued to sloow down until its safe to change directions
     
     break;
 
@@ -1214,6 +1248,7 @@ void updateSpeed(void) {
     motorPID(&M2);
     motorPID(&M3);
     motorPID(&M4);
+    measuredMotorSpeed = roundf((float(M1.encoderSpeed+M2.encoderSpeed+M3.encoderSpeed+M4.encoderSpeed)/4.0)*100)/100; //average motor speeds
   }
 
   motorStepPin1.pulsewidth_us(abs(M1.dutyCycle)); // limited to: 40 to 85 roughly
@@ -1250,6 +1285,18 @@ void setMotorsBackward(void) {
 // end motor machine
 //====================================================
 
+
+//====================================================
+// linear to rotational speed
+//====================================================
+
+double linearToRotational(double linear){
+  return linear / (wheelDiameter * PI);
+}
+
+//====================================================
+// end linear to rotational speed
+//====================================================
 
 
 //====================================================
@@ -1352,16 +1399,16 @@ void onEventsCallback(WebsocketsEvent event, String data) {
 void sendJson(void) {
   jsonPacket.clear();
   jsonMessage = "";
-
+  jsonPacket["wheelDiameter"] = wheelDiameter;
   jsonPacket["motorDirection"]  = motorDirection;
   jsonPacket["measuredMotorSpeed"]    = measuredMotorSpeed;
   jsonPacket["motorMode"]     = motorMode;
   jsonPacket["motorEnable"]   = motorEnable;
 
-  jsonPacket["PID_setpoint"]     = setpoint;
-  jsonPacket["PID_Kp"]           = Kp;
-  jsonPacket["PID_Ki"]           = Ki;
-  jsonPacket["PID_Kd"]           = Kd;
+  jsonPacket["targetGlueHeight"]     = targetGlueHeight;
+  jsonPacket["UT_Kp"]           = UT_Kp;
+  jsonPacket["UT_Ki"]           = UT_Ki;
+  jsonPacket["UT_Kd"]           = UT_Kd;
 
   jsonPacket["ultrasonicValue"] = ultrasonicDistance;
   jsonPacket["batteryLevel"]    = aveBatteryValue;
@@ -1387,12 +1434,19 @@ void receiveJson(void) {
     Serial.println(error.f_str());
   }
 
+  wheelDiameter = double(jsonPacket["wheelDiameter"]);
+
   // motor stuff 
   // get and set the value to the local var and to the shared memory space
   motorDirection = int(jsonPacket["motorDirection"]);
 
   // get and set the value to the local var and to the shared memory space
-  motorSpeed = double(jsonPacket["motorSpeed"]);
+  motorSpeed = linearToRotational(double(jsonPacket["motorSpeed"])); //motor speed is rotational
+  
+  M_Kp       = double(jsonPacket["M_Kp"]);
+  M_Ki       = double(jsonPacket["M_Ki"]);
+  M_Kd       = double(jsonPacket["M_Kd"]);
+
   Serial.println(motorSpeed);
 
   //targetMotorSpeed = double(jsonPacket["targetMotorSpeed"]);
@@ -1401,11 +1455,10 @@ void receiveJson(void) {
 
   
   // get the pid values from the tablet
-  setpoint = double(jsonPacket["targetGlueHeight"]);
-  Kp       = double(jsonPacket["PID_Kp"]);
-  Ki       = double(jsonPacket["PID_Ki"]);
-  Kd       = double(jsonPacket["PID_Kd"]);
-
+  targetGlueHeight = double(jsonPacket["targetGlueHeight"]);
+  UT_Kp       = double(jsonPacket["UT_Kp"]);
+  UT_Ki       = double(jsonPacket["UT_Ki"]);
+  UT_Kd       = double(jsonPacket["UT_Kd"]);
 
 
   jsonPacket.clear();
@@ -1414,6 +1467,54 @@ void receiveJson(void) {
 //====================================================
 // end receive json machine
 //====================================================
+
+
+
+
+//====================================================
+// ultrasonic machine
+//====================================================
+void visionMachine() {
+  switch(visionState){
+    case VISION_WAITING:
+      if (!visionDelay) {
+        visionState = VISION_READING;
+      }
+    break;
+    case VISION_READING:
+      if (!visionDelay) {
+        
+        trajectory = Serial.readString();
+
+        if (trajectory!=""){
+          digitalWrite(LED_BLUE, LOW);
+          digitalWrite(LED_RED, LOW);
+          digitalWrite(LED_GREEN, LOW);
+        }
+
+        else{
+          digitalWrite(LED_BLUE, HIGH);
+          digitalWrite(LED_RED,  HIGH);
+          digitalWrite(LED_GREEN,HIGH);
+        }
+
+        visionDelay = 1; // 0.25 seconds
+        visionState = VISION_WAITING;
+      }
+
+    break;
+    default:
+    break;
+  }
+
+}
+
+//====================================================
+// end ultrasonic machine
+//====================================================
+
+
+
 
 
 //====================================================
