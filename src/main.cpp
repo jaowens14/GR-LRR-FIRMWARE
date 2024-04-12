@@ -65,6 +65,7 @@ volatile int testDelay = 0;
 #define WEBSOCKETS_PORT     8080
 const uint16_t websockets_server_port = WEBSOCKETS_PORT;
 const char* websockets_server_host = "10.42.0.109";
+const char* hostname = "GRLLR";
 
 const char* ssid = "grlrr2024"; //Enter SSID
 const char* password = "grlrr2024"; //Enter Password
@@ -224,6 +225,7 @@ const uint8_t DirPin4 = LEDB + 1 + PD_5; // gpio 3
 //const uint8_t pin_inv = D3;
 double lastMotorSpeed = 0;
 double motorSpeed = 0;        // This is the speed set in the tablet in rotations per second
+double speedOffset = 0;
 double newMotorSpeed = 0;
 
 //long finalMotorSpeed = 0;
@@ -640,7 +642,7 @@ void setup() {
 
   // wifi setup
   while (!Serial && millis() < 2000);
-
+  
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED){
@@ -873,10 +875,10 @@ void UltrasonicMachine() {
         //2.84 to 100mm
 
 
-        //leaky integrator over rolling ave, gain of 0.1
-        aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.1;
+        //leaky integrator gain of 0.5
+        aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.5;
 
-        ultrasonicDistance = voltagetoDistance(aveUltrasonicValue);
+        ultrasonicDistance = round(voltagetoDistance(aveUltrasonicValue));
 
 
         ultrasonicDelay = 25; // 0.25 seconds
@@ -895,9 +897,14 @@ double voltagetoDistance(double ultrasonicVoltage) {
   
   double ultrasonicDist = 28.986 * ultrasonicVoltage + 17.389;
 
-  if (ultrasonicDist < 30.0 || ultrasonicDist > 300.0){
-    return 9999.0;
+  if (ultrasonicDist < 30.0){
+    return 30.0;
   }
+  
+  if (ultrasonicDist > 300.0){
+    return 300.0;
+  }
+
   else {
     return ultrasonicDist;
   }
@@ -1031,13 +1038,17 @@ int voltageToPercent(int voltage) {
 // pid machine
 //====================================================
 void PID(void){
+  // found that values of p=0.5, i=0.0, and d=0.0 work ok
   if (!PIDDelay){
     PIDDelay = 1;
     initMeasurement = ultrasonicDistance;
 
     // compute error
     initError = targetGlueHeight - initMeasurement;
-        //Serial.println("init eror");
+    // error == 160 - 150
+    // error == 10=
+
+    //Serial.println("init eror");
     //Serial.println(initError);
 
     // calculate the proportional term
@@ -1051,21 +1062,32 @@ void PID(void){
         //Serial.println("i");
     //Serial.println(i);
 
-    i = constrain(i, -4.0, 4.0); // these limits are the duty cycle
+    i = constrain(i, -3.0, 3.0); // these limits are the max rotations per second
 
     d = -(2.0 * UT_Kd * (initMeasurement-prevMeasurement) + (2.0 * tau - T) * d) / (2.0 * tau + T);
     //Serial.println("d");
     //Serial.println(d);
     // sum control terms
-    u = constrain(p + i + d, 0.0, 4.0); // between the rotations per sec of the motors
+    u = constrain(p + i + d, 0, 3.0); // between the rotations per sec of the motors // minus sign to invert the direction
 
   // pid runs all the time but only shows values and changes speed when enabled
   if (motorMode) {
     motorSpeed = u;
+
+    // leaky intergrator
+    //motorSpeed += (u - motorSpeed)*0.1;
+
     Serial.println("u: ");
     Serial.println(u);
     Serial.println("motorspeed");
     Serial.println(motorSpeed);
+
+    Serial.println("UT_Kp");
+    Serial.println(UT_Kp);
+    Serial.println("UT_Ki");
+    Serial.println(UT_Ki);
+    Serial.println("UT_Kd");
+    Serial.println(UT_Kd);
   }
 
 
@@ -1086,6 +1108,7 @@ void PID(void){
 // motor pid machine
 //====================================================
 void motorPID(struct MotorEncoder *m){
+  // good values seem to be p=25 and i=10, d = 10
 
   //Serial.print("Error In function ");
   //Serial.println(m->initError);
@@ -1191,9 +1214,7 @@ void motorMachine() {
       if(motorDirection != currentMotorDirection) {
         currentMotorDirection = motorDirection;
         motorState = MOTOR_CHANGING_DIRECTION;
-        lastMotorSpeed = motorSpeed; // store the current motor speed
-        motorSpeed = 0; // set the speed to zero
-        
+        stopMotors();
         Serial.println("This should only run once");
       }
       updateSpeed();
@@ -1204,23 +1225,19 @@ void motorMachine() {
     //Serial.println("changing direction");
 
       
-
-
       if (motorDirection == 0) {
         stopMotors();
         motorState = MOTOR_STOPPED;
       }
 
-      if (motorDirection == 1 && measuredMotorSpeed <= 0.01) { 
+      if (motorDirection == 1) { 
         setMotorsForward();
-        motorSpeed = lastMotorSpeed; // reinitialize the last speed you were using 
         motorState = MOTOR_RUNNING;
         Serial.println("going forward now");
       }
 
-      if (motorDirection == 2 && measuredMotorSpeed <= 0.01) {
+      if (motorDirection == 2) {
         setMotorsBackward();
-        motorSpeed = lastMotorSpeed;
         motorState = MOTOR_RUNNING;
         Serial.println("going backward now");
       }
@@ -1402,6 +1419,7 @@ void sendJson(void) {
   jsonPacket["wheelDiameter"] = wheelDiameter;
   jsonPacket["motorDirection"]  = motorDirection;
   jsonPacket["measuredMotorSpeed"]    = measuredMotorSpeed;
+  jsonPacket["motorSpeed"]            = motorSpeed;
   jsonPacket["motorMode"]     = motorMode;
   jsonPacket["motorEnable"]   = motorEnable;
 
