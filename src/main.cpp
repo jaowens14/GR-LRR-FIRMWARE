@@ -1109,6 +1109,7 @@ void PID(void){
 //====================================================
 void motorPID(struct MotorEncoder *m){
   // good values seem to be p=25 and i=10, d = 10
+  // better values seem to be p=10, I=15, d = 0
 
   //Serial.print("Error In function ");
   //Serial.println(m->initError);
@@ -1148,13 +1149,13 @@ void motorPID(struct MotorEncoder *m){
 void encoderMachine() {
   if (!encoderDelay){
     
-    encoderDelay = 5; // 0.1 seconds
+    encoderDelay = 1; // 0.1 seconds
 
       // fraction of a rotation in 0.01 of a second  
       // the amount of rotation in that 0.01 of a second    
       // leaky integrator, gain of 0.1
       //M1.encoderSpeed += ( (double(encoderCount1) / double(encoderRotation)) / 0.5 - M1.encoderSpeed) * 0.75;
-      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.5 - M1.encoderSpeed)*0.9;
+      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.1 - M1.encoderSpeed)*0.9;
 
       // V = R*W
       //wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
@@ -1162,15 +1163,15 @@ void encoderMachine() {
       //M3.encoderSpeed = (double(encoderCount3)/double(encoderRotation)) / 0.5;
       //M4.encoderSpeed = (double(encoderCount4)/double(encoderRotation)) / 0.5;
 
-      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.5 - M2.encoderSpeed)*0.9;
-      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.5 - M3.encoderSpeed)*0.9;
-      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.5 - M4.encoderSpeed)*0.9;
+      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.1 - M2.encoderSpeed)*0.9;
+      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.1 - M3.encoderSpeed)*0.9;
+      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.1 - M4.encoderSpeed)*0.9;
 
-      ///Serial.println("encoder counts");
-      ///Serial.println(encoderCount1);
-      ///Serial.println(encoderCount2);
-      ///Serial.println(encoderCount3);
-      ///Serial.println(encoderCount4);
+      Serial.println("encoder counts");
+      Serial.println(encoderCount1);
+      Serial.println(encoderCount2);
+      Serial.println(encoderCount3);
+      Serial.println(encoderCount4);
 
       encoderCount1 = 0;
       encoderCount2 = 0;
@@ -1277,6 +1278,10 @@ void updateSpeed(void) {
 
 
 void stopMotors(void){
+  M1.dutyCycle = 0;
+  M2.dutyCycle = 0;
+  M3.dutyCycle = 0;
+  M4.dutyCycle = 0;  
   motorStepPin4.pulsewidth_us(int(0)); // limited to: 40 to 85 roughly
   motorStepPin3.pulsewidth_us(int(0));
   motorStepPin2.pulsewidth_us(int(0));
