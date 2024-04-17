@@ -1039,6 +1039,7 @@ int voltageToPercent(int voltage) {
 //====================================================
 void PID(void){
   // found that values of p=0.5, i=0.0, and d=0.0 work ok
+  // found that values of P=0.05, i=0.0, d=0.0 work well when the reference is set to the zero glue ultrasonic reading
   if (!PIDDelay){
     PIDDelay = 1;
     initMeasurement = ultrasonicDistance;
@@ -1110,6 +1111,7 @@ void PID(void){
 void motorPID(struct MotorEncoder *m){
   // good values seem to be p=25 and i=10, d = 10
   // better values seem to be p=10, I=15, d = 0
+  // better values seem to be p=25, i=15, d = 0
 
   //Serial.print("Error In function ");
   //Serial.println(m->initError);
