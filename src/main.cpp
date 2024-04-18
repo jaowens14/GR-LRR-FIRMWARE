@@ -1280,10 +1280,14 @@ void updateSpeed(void) {
 
 
 void stopMotors(void){
+
+  motorSpeed = 0;
+
   M1.dutyCycle = 0;
   M2.dutyCycle = 0;
   M3.dutyCycle = 0;
-  M4.dutyCycle = 0;  
+  M4.dutyCycle = 0; 
+
   motorStepPin4.pulsewidth_us(int(0)); // limited to: 40 to 85 roughly
   motorStepPin3.pulsewidth_us(int(0));
   motorStepPin2.pulsewidth_us(int(0));
