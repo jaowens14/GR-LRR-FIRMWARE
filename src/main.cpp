@@ -241,6 +241,7 @@ int currentMotorDirection = 0;
 bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
 bool motorEnable = 0;         // toggle to diable the motors
 volatile int motorDelay = 0;
+volatile int motorDirectionDelay = 0;
 bool direction = false; // false is forward, true is backward
 double currentMotorSpeed = 0;
 long deltaMotorDutyCycle = 0;
@@ -530,6 +531,8 @@ void m7timer() {
     if (batteryDelay) batteryDelay--;
     if (encoderDelay) encoderDelay--;
     if (motorDelay) motorDelay--;
+    if (motorDirectionDelay) motorDirectionDelay--;
+
     
 
   }
@@ -1203,57 +1206,52 @@ void motorMachine() {
   switch(motorState){
 
     case MOTOR_STOPPED:
-      //Serial.println("motor stopped");
+      Serial.println("motor stopped");
+      stopMotors();
       if(motorDirection == 1 || motorDirection == 2) {
         motorState = MOTOR_CHANGING_DIRECTION;
       }
-      
-      stopMotors();
-  
+
     break;
 
     case MOTOR_RUNNING:
-      //Serial.println("motor running");
+
       if(motorDirection != currentMotorDirection) {
-        currentMotorDirection = motorDirection;
-        motorState = MOTOR_CHANGING_DIRECTION;
-        stopMotors();
-        Serial.println("This should only run once");
+          currentMotorDirection = motorDirection;
+          motorState = MOTOR_CHANGING_DIRECTION;
+          stopMotors();
+          motorDirectionDelay = 5; // 0.5 seconds
       }
+
       updateSpeed();
 
     break;
 
     case MOTOR_CHANGING_DIRECTION:
-    //Serial.println("changing direction");
 
-      
       if (motorDirection == 0) {
-        stopMotors();
         motorState = MOTOR_STOPPED;
       }
 
-      if (motorDirection == 1) { 
+      if (!motorDirectionDelay && motorDirection == 1) { 
         setMotorsForward();
         motorState = MOTOR_RUNNING;
-        Serial.println("going forward now");
       }
 
-      if (motorDirection == 2) {
+      if (!motorDirectionDelay && motorDirection == 2) {
         setMotorsBackward();
         motorState = MOTOR_RUNNING;
-        Serial.println("going backward now");
       }
 
-      updateSpeed(); // continued to sloow down until its safe to change directions
-    
+      
+      updateSpeed();
+
+
     break;
 
 
     case MOTOR_ERROR:
-
     break;
-
 
     default:
     break;
@@ -1280,7 +1278,7 @@ void updateSpeed(void) {
 
 
 void stopMotors(void){
-
+  lastMotorSpeed = motorSpeed;
   motorSpeed = 0;
 
   M1.dutyCycle = 0;
@@ -1295,6 +1293,7 @@ void stopMotors(void){
 }
 
 void setMotorsForward(void) {
+  motorSpeed = lastMotorSpeed;
   digitalWrite(DirPin1, false);
   digitalWrite(DirPin2, false);
   digitalWrite(DirPin3, false);
@@ -1302,6 +1301,7 @@ void setMotorsForward(void) {
 }
 
 void setMotorsBackward(void) {  
+  motorSpeed = lastMotorSpeed;
   digitalWrite(DirPin1, true);
   digitalWrite(DirPin2, true);
   digitalWrite(DirPin3, true);
