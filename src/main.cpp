@@ -327,6 +327,8 @@ const uint8_t encoderPin2 = D12; // connected to driver 2
 
 const uint8_t encoderPin1 = D11; // connected to driver 1
 
+
+
 volatile int encoderDelay = 0;
 
 volatile int  encoderCount1 = 0;
@@ -335,6 +337,7 @@ volatile int  encoderCount3 = 0;
 volatile int  encoderCount4 = 0;
 
 const int encoderRotation = 1120;
+double encoderTime = 0;
 double rotations = 0;
 //====================================================
 // end encoder definitions
@@ -878,12 +881,19 @@ void UltrasonicMachine() {
         //2.84 to 100mm
 
 
-        //leaky integrator gain of 0.5
-        aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.5;
+        // check if the reading is any good, if its below a specific threshold it may be a bad value
+        // if the value is less than 1 or greater than 6.0 its a bad value
+        // this is about 50mm and 190mm
+        if (ultrasonicValue > 1.0 && ultrasonicValue < 6.0) {
+          // update dist, otherwise dont
+          //leaky integrator gain of 0.5
+          aveUltrasonicValue += (ultrasonicValue - aveUltrasonicValue) * 0.1; // updated the gain
+          ultrasonicDistance = round(voltagetoDistance(aveUltrasonicValue));
+        }
 
-        ultrasonicDistance = round(voltagetoDistance(aveUltrasonicValue));
 
-
+        Serial.println("ultrasonicValue");
+        Serial.println(ultrasonicValue);
         ultrasonicDelay = 25; // 0.25 seconds
         UltrasonicState = UT_WAITING;
       }
@@ -899,18 +909,9 @@ void UltrasonicMachine() {
 double voltagetoDistance(double ultrasonicVoltage) {
   
   double ultrasonicDist = 28.986 * ultrasonicVoltage + 17.389;
-
-  if (ultrasonicDist < 30.0){
-    return 30.0;
-  }
   
-  if (ultrasonicDist > 300.0){
-    return 300.0;
-  }
+  return ultrasonicDist;
 
-  else {
-    return ultrasonicDist;
-  }
 
 }
 //====================================================
@@ -1154,13 +1155,13 @@ void motorPID(struct MotorEncoder *m){
 void encoderMachine() {
   if (!encoderDelay){
     
-    encoderDelay = 1; // 0.1 seconds
+    encoderDelay = 5; // 0.5 seconds
 
       // fraction of a rotation in 0.01 of a second  
       // the amount of rotation in that 0.01 of a second    
       // leaky integrator, gain of 0.1
       //M1.encoderSpeed += ( (double(encoderCount1) / double(encoderRotation)) / 0.5 - M1.encoderSpeed) * 0.75;
-      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.1 - M1.encoderSpeed)*0.9;
+      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.5 - M1.encoderSpeed)*0.9;
 
       // V = R*W
       //wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
@@ -1168,15 +1169,16 @@ void encoderMachine() {
       //M3.encoderSpeed = (double(encoderCount3)/double(encoderRotation)) / 0.5;
       //M4.encoderSpeed = (double(encoderCount4)/double(encoderRotation)) / 0.5;
 
-      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.1 - M2.encoderSpeed)*0.9;
-      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.1 - M3.encoderSpeed)*0.9;
-      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.1 - M4.encoderSpeed)*0.9;
+      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.5 - M2.encoderSpeed)*0.9;
+      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.5 - M3.encoderSpeed)*0.9;
+      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.5 - M4.encoderSpeed)*0.9;
 
       Serial.println("encoder counts");
       Serial.println(encoderCount1);
       Serial.println(encoderCount2);
       Serial.println(encoderCount3);
       Serial.println(encoderCount4);
+
 
       encoderCount1 = 0;
       encoderCount2 = 0;
@@ -1206,7 +1208,7 @@ void motorMachine() {
   switch(motorState){
 
     case MOTOR_STOPPED:
-      Serial.println("motor stopped");
+      //Serial.println("motor stopped");
       stopMotors();
       if(motorDirection == 1 || motorDirection == 2) {
         motorState = MOTOR_CHANGING_DIRECTION;
@@ -1267,6 +1269,9 @@ void updateSpeed(void) {
     motorPID(&M3);
     motorPID(&M4);
     measuredMotorSpeed = roundf((float(M1.encoderSpeed+M2.encoderSpeed+M3.encoderSpeed+M4.encoderSpeed)/4.0)*100)/100; //average motor speeds
+
+
+
   }
 
   motorStepPin1.pulsewidth_us(abs(M1.dutyCycle)); // limited to: 40 to 85 roughly
