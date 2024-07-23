@@ -52,15 +52,6 @@ uint32_t const SRH_ID = 0x16008004;
 
 
 
-uint32_t const erefsAxis1ID = 0x048020A8;
-uint32_t const erefsAxis2ID = 0x048040A8;
-uint32_t const erefsAxis3ID = 0x048060A8;
-uint32_t const erefsAxis4ID = 0x048080A8;
-
-
-
-
-
 //16008005 11 00 0E 09
 //1600A005 11 00 0E 09 
 /**************************************************************************************
