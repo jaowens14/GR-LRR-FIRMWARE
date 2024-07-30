@@ -9,7 +9,7 @@
 // END TITLE BLOCK
 //====================================================
 
-const int BUFFER_SIZE = 100;  // Define the buffer size
+
 //====================================================
 // INITIALIZATION AND VARIABLES
 //====================================================
@@ -630,58 +630,57 @@ void setup() {
 
   // turn red led on for initialization setup
   digitalWrite(RED_LED, LOW);
-  delay(100);
   // extra stepper pin
 
   // state led setup
-  //pinMode(STATE_LED_RED, OUTPUT);
-  //pinMode(STATE_LED_YELLOW, OUTPUT);
-  //pinMode(STATE_LED_GREEN, OUTPUT);
-  //// turn on all big leds
-  //digitalWrite(STATE_LED_RED, HIGH);
-  //digitalWrite(STATE_LED_YELLOW, HIGH);
-  //digitalWrite(STATE_LED_GREEN, HIGH);
-//
-//
-  ////done with steppers, timers, serial configs
-  //digitalWrite(STATE_LED_RED, LOW);
+  pinMode(STATE_LED_RED, OUTPUT);
+  pinMode(STATE_LED_YELLOW, OUTPUT);
+  pinMode(STATE_LED_GREEN, OUTPUT);
+  // turn on all big leds
+  digitalWrite(STATE_LED_RED, HIGH);
+  digitalWrite(STATE_LED_YELLOW, HIGH);
+  digitalWrite(STATE_LED_GREEN, HIGH);
+
+
+  //done with steppers, timers, serial configs
+  digitalWrite(STATE_LED_RED, LOW);
 
   // wifi setup
-  //while (!Serial && millis() < 2000);
-  //
-  //WiFi.begin(ssid, password);
-//
-  //while (WiFi.status() != WL_CONNECTED){
-  //  delay(500);
-  //  WiFi.begin(ssid, password);
-  //  Serial.println("trying to connect");
-  //}
-//
-  //// wifi connected
+  while (!Serial && millis() < 2000);
+  
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED){
+    delay(500);
+    WiFi.begin(ssid, password);
+    Serial.println("trying to connect");
+  }
+
+  // wifi connected
   digitalWrite(RED_LED, HIGH);
 
-  //Serial.println("WiFi connected");
-  //Serial.println("IP address: ");
-  //Serial.println(WiFi.localIP());
-  //Serial.println("Mac address: ");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("Mac address: ");
   
 
   // done and connected with wifi config
-  //digitalWrite(STATE_LED_YELLOW, LOW);
-//
-//
-  //// websocket setup
-  //wsServer.listen(websockets_server_port);
-  //Serial.println("websocket server listening...");
-  //// end websocket setup
-//
-//
-  //// ultrasonic setup
-  //analogReadResolution(12);
-  //pinMode(ULTRASONIC_PIN, INPUT);
-//
-  ////battery monitor setup
-  //pinMode(BATTERY_PIN, INPUT);
+  digitalWrite(STATE_LED_YELLOW, LOW);
+
+
+  // websocket setup
+  wsServer.listen(websockets_server_port);
+  Serial.println("websocket server listening...");
+  // end websocket setup
+
+
+  // ultrasonic setup
+  analogReadResolution(12);
+  pinMode(ULTRASONIC_PIN, INPUT);
+
+  //battery monitor setup
+  pinMode(BATTERY_PIN, INPUT);
 
   // clamp setup
   //pinMode(CLAMP_PIN, INPUT);
@@ -689,45 +688,45 @@ void setup() {
   // estop detect setup
   //pinMode(ESTOP_PIN, INPUT);
   //pinMode(D5, OUTPUT);
-  //delay(1000);
+  delay(1000);
 
   // done with all setup
-  //digitalWrite(STATE_LED_GREEN, LOW);
-//
-//
-//
-  //// motor setup
-  //motorStepPin1.period_us(100);
-  //motorStepPin1.pulsewidth_us(0);
-//
-  //motorStepPin2.period_us(100);
-  //motorStepPin2.pulsewidth_us(0);
-//
-  //motorStepPin3.period_us(100);
-  //motorStepPin3.pulsewidth_us(0);
-  ////motorStepPin4.period_us(100000);
-//
-  //motorStepPin4.period_us(100);
-  //motorStepPin4.pulsewidth_us(0);
-//
-//
-  //pinMode(DirPin1, OUTPUT);
-  //pinMode(DirPin2, OUTPUT);
-  //pinMode(DirPin3, OUTPUT);
-  //pinMode(DirPin4, OUTPUT);
-//
-  //digitalWrite(DirPin1, direction);
-  //digitalWrite(DirPin2, direction);
-  //digitalWrite(DirPin3, direction);
-  //digitalWrite(DirPin4, direction);  
-  //
-  //StateLEDState = READY;
-//
-  //attachInterrupt(encoderPin1, incrementEncoder1, RISING);
-  //attachInterrupt(encoderPin2, incrementEncoder2, RISING);
-  //attachInterrupt(encoderPin3, incrementEncoder3, RISING);
-  //attachInterrupt(encoderPin4, incrementEncoder4, RISING);
-//
+  digitalWrite(STATE_LED_GREEN, LOW);
+
+
+
+  // motor setup
+  motorStepPin1.period_us(100);
+  motorStepPin1.pulsewidth_us(0);
+
+  motorStepPin2.period_us(100);
+  motorStepPin2.pulsewidth_us(0);
+
+  motorStepPin3.period_us(100);
+  motorStepPin3.pulsewidth_us(0);
+  //motorStepPin4.period_us(100000);
+
+  motorStepPin4.period_us(100);
+  motorStepPin4.pulsewidth_us(0);
+
+
+  pinMode(DirPin1, OUTPUT);
+  pinMode(DirPin2, OUTPUT);
+  pinMode(DirPin3, OUTPUT);
+  pinMode(DirPin4, OUTPUT);
+
+  digitalWrite(DirPin1, direction);
+  digitalWrite(DirPin2, direction);
+  digitalWrite(DirPin3, direction);
+  digitalWrite(DirPin4, direction);  
+  
+  StateLEDState = READY;
+
+  attachInterrupt(encoderPin1, incrementEncoder1, RISING);
+  attachInterrupt(encoderPin2, incrementEncoder2, RISING);
+  attachInterrupt(encoderPin3, incrementEncoder3, RISING);
+  attachInterrupt(encoderPin4, incrementEncoder4, RISING);
+
 }
 //====================================================
 // end setup
@@ -740,15 +739,15 @@ void loop() {
 
   BlueLedMachine();
   // RedLedMachine();
-  //WebSocketMachine();
-  //UltrasonicMachine();
-  //BatteryMachine();
-  ////ClampMachine();
-  //StateLEDMachine();
-  ////EstopMachine();
-  //motorMachine();
-  //PID();
-  //encoderMachine();
+  WebSocketMachine();
+  UltrasonicMachine();
+  BatteryMachine();
+  //ClampMachine();
+  StateLEDMachine();
+  //EstopMachine();
+  motorMachine();
+  PID();
+  encoderMachine();
   //test();
 }
 //====================================================
@@ -793,28 +792,6 @@ void test() {
 // blue led machine
 //====================================================
 void BlueLedMachine() {
-  char data[BUFFER_SIZE] = {0}; 
-  Serial.readBytesUntil('\n', data, BUFFER_SIZE - 1);
-
-  StaticJsonDocument<200> doc;
-
-  // Populate the JSON document
-  doc["sensor"] = "gps";
-  doc["time"] = 1351824120;
-  doc["data"][0] = 48.756080;
-  doc["data"][1] = 2.302038;
-  
-  // Serialize the JSON document to a string
-  char output[256]; // Ensure this buffer is large enough for your JSON
-  serializeJson(doc, output);
-
-  // Use the JSON string as a const char*
-  Serial.write(output);
-  Serial.write('\n');
-
-  
-
-
   switch(BlueLedState) {
     case LED_OFF:
       if (!blueLedDelay) {

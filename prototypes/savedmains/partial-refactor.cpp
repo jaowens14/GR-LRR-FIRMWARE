@@ -1,108 +1,48 @@
 //====================================================
 // TITLE BLOCK
 //====================================================
-/*  Project: GR-LRR
+/*  
+ *  Project: GR-LRR
  *  Author: Jacob Owens - Vestas Blades America
  *  Date: 07/23/2024
  */
 //====================================================
 // END TITLE BLOCK
 //====================================================
-
-const int BUFFER_SIZE = 100;  // Define the buffer size
+//
+//
+//
+//
 //====================================================
-// INITIALIZATION AND VARIABLES
-//====================================================
-
-
-//====================================================
-// shared data
-//====================================================
-//struct shared_data {
-//  long motorSpeed = 0;    // speed from PID control
-//  long measuredMotorSpeed = 0;   // speed from encoders
-//  int motorDirection = 0; // stepper state : 0 = stopped, 1 = forward, 2 = backward
-//};
-//volatile struct shared_data * const xfr_ptr = (struct shared_data *)0x38001000;
-//====================================================
-// end shared data
-//====================================================
-
-
-//====================================================
-// included libraries
+// GENERAL LIBRARIES
 //====================================================
 #include <Arduino.h>
+#include <mbed.h>
 #include <math.h>
 //====================================================
-// end included libraries
+// END GENERAL LIBRARIES
 //====================================================
-
+//
+//
+//
+//
 //====================================================
-// timing debug
+// COMMUNICATION DEFINTIONS
 //====================================================
-bool testState = false;
-volatile int testDelay = 0;
+#include <ArduinoJson.h>
+// json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
+StaticJsonDocument<512> jsonPacket;
+// json message is a string that contains all the info smashed together
+String jsonMessage = "";
 //====================================================
-// end timing debug
+// END COMMUNICATION DEFINTIONS
 //====================================================
-
-
+//
+//
+//
+//
 //====================================================
-// wifi and websockets definitions
-//====================================================
-#define USE_WIFI_PORTENTA_H7  true
-#define USE_WIFI_NINA         false
-#define USE_WIFI_CUSTOM       false
-#define WEBSOCKETS_USE_PORTENTA_H7_WIFI           true
-#define DEBUG_WEBSOCKETS_PORT     Serial
-// Debug Level from 0 to 4
-#define _WEBSOCKETS_LOGLEVEL_     1
-#include <WebSockets2_Generic.h>
-#include <WiFi.h>
-
-#define WEBSOCKETS_PORT     8080
-const uint16_t websockets_server_port = WEBSOCKETS_PORT;
-const char* websockets_server_host = "10.42.0.109";
-const char* hostname = "GRLLR";
-
-const char* ssid = "grlrr2024"; //Enter SSID
-const char* password = "grlrr2024"; //Enter Password
-
-using namespace websockets2_generic;
-bool wsConnected = false;
-bool wsFlag = 0;
-volatile int wsReconnectDelay = 0;
-volatile int wsDelay = 0;
-
-int uptime = 0;
-
-WebsocketsServer wsServer;
-WebsocketsMessage wsMessage;
-WebsocketsClient wsClient;
-//====================================================
-// end wifi and websockets definitions
-//====================================================
-
-
-
-//====================================================
-// vision definitions
-//====================================================
-
-volatile int visionDelay = 0;
-String trajectory = "";
-
-//====================================================
-// end vision definitions
-//====================================================
-
-// old stuff
-// #define EXTRA_STEPPER_ENABLE_PIN D0
-// const uint8_t CSPin = D7;
-
-//====================================================
-// ultrasonic definitions
+// ULTRASONIC SENSOR DEFINITIONS
 //====================================================
 #define ULTRASONIC_PIN A1
 long duration = 0; 
@@ -117,30 +57,8 @@ double ultrasonicDistance = 0;
 const int numUltrasonicSamples = 50;
 double ultrasonicSamples[numUltrasonicSamples] = {0};
 int ultrasonicSampleNumber = 0;
-//====================================================
-// end ultrasonic definitions
-//====================================================
 
 
-//====================================================
-// battery monitor definitions
-//====================================================
-#define BATTERY_PIN A0
-double battery_value = 0;
-volatile int batteryDelay = 0;
-
-double aveBatteryValue = 0;
-const int numBatterySamples = 20;
-double batterySamples[numBatterySamples] = {0};
-int batterySampleNumber = 0;
-//====================================================
-// end battery monitor definitions
-//====================================================
-
-
-//====================================================
-// PID definitions
-//====================================================
 double targetGlueHeight = 0; // target ultrasonic value
 double UT_Kp = 0;
 double UT_Ki = 0;
@@ -163,263 +81,6 @@ double u = 0; // control output
 
 double T = 0.1; // sampling time constant 1/10 second
 double tau = 2.0*T; // low pass time constant 2/10 second
-//====================================================
-// end PID definitions
-//====================================================
-
-
-
-//====================================================
-// Motor PID definitions
-//====================================================
-double M_setSpeed = 0; // target motor speed
-double M_Kp = 5; // proportional gain
-double M_Ki = 10; // integral gain
-double M_Kd = 10; // derivative gain
-
-// P[n] = Kp * e[n]
-// I[n] = Ki * T / 2 * (E[n] + E[n-1]) + i[n-1]
-// D[n] = 2Kd /( 2tau + T) * (E[n] - E[n-1]) + 2tau - T/ 2tau + T * D[n-1]
-
-struct  MotorEncoder {
-  int dutyCycle = 0;
-  double encoderSpeed = 0;
-  double initMeasurement = 0;
-  double prevMeasurement = 0;
-  double initError = 0;
-  double prevError = 0;
-};
-
-struct MotorEncoder M1, M2, M3, M4;
-
-
-double M_p = 0; //  proportional term
-double M_i = 0; // integral term
-double M_d = 0; // derivative term
-double M_u = 0; // control output
-
-double M_T = 0.1; // sampling time constant 1/100 second based on the rate at which the function is executed
-double M_tau = 2.0*M_T; // low pass time constant 2/100 second
-//====================================================
-// end Motor PID definitions
-//====================================================
-
-
-//====================================================
-// motor definitions
-//====================================================
-#include <mbed.h>
-
-mbed::PwmOut motorStepPin1(PK_1);  // d1 // connected to driver 1
-mbed::PwmOut motorStepPin2(PJ_11); // d2 // connected to driver 2
-mbed::PwmOut motorStepPin3(PC_6);  // d5 // connected to driver 3
-mbed::PwmOut motorStepPin4(PC_7);  // d4 // connected to driver 4
-
-const uint8_t DirPin1 = LEDB + 1 + PC_13; // gpio 0
-const uint8_t DirPin2 = LEDB + 1 + PC_15; // gpio 1
-const uint8_t DirPin3 = LEDB + 1 + PD_4; // gpio 2
-const uint8_t DirPin4 = LEDB + 1 + PD_5; // gpio 3
-
-
-//const uint8_t pin_inv = D3;
-double lastMotorSpeed = 0;
-double motorSpeed = 0;        // This is the speed set in the tablet in rotations per second
-double speedOffset = 0;
-double newMotorSpeed = 0;
-
-//long finalMotorSpeed = 0;
-//long initialMotorSpeed = 0;
-////long motorAcceleration = 5; // const set from experience units are %/0.1 sec
-long motorDuration = 0;     // the time needed to accelerate or decelerate 
-//long velocityIncrement = 0;
-double measuredMotorSpeed = 0;       // speed from encoder
-int motorDirection = 0;     // stepper state : 0 = stopped, 1 = forward, 2 = backward
-int currentMotorDirection = 0;
-//int lastMotorDirection = 0;
-//double targetMotorSpeed = 0;  // changing the offset of the set point in the PID controller
-bool motorMode = 0;         // toggle to use PID mode (1) or set speed mode (0)
-bool motorEnable = 0;         // toggle to diable the motors
-volatile int motorDelay = 0;
-volatile int motorDirectionDelay = 0;
-bool direction = false; // false is forward, true is backward
-double currentMotorSpeed = 0;
-long deltaMotorDutyCycle = 0;
-volatile int directionDelay = 0;
-
-
-int motorDutyCycle1 = 0;
-int motorDutyCycle2 = 0;
-int motorDutyCycle3 = 0;
-int motorDutyCycle4 = 0;
-
-double wheelDiameter = 0.05; // mm
-
-//==================================================
-// end motor definitions
-//====================================================
-
-
-//====================================================
-// clamp definitions
-//====================================================
-//#define CLAMP_PIN D5
-bool clamped = false;
-volatile int clampDelay = 0;
-//====================================================
-// end clamp definitions
-//====================================================
-
-
-//====================================================
-// led definitions
-//====================================================
-#define RED_LED     LEDR
-#define GREEN_LED   LEDG
-#define BLUE_LED    LEDB
-bool redLedFlag = false;
-bool blueLedFlag = false;
-volatile int redLedDelay = 0;
-volatile int blueLedDelay = 0;
-//====================================================
-// end led definitions
-//====================================================
-
-
-//====================================================
-// state led definitions
-//====================================================
-#define STATE_LED_RED PE_3      // gpio 4
-#define STATE_LED_YELLOW PG_3   // gpio 5
-#define STATE_LED_GREEN PG_10   // gpio 6
-volatile int stateLEDDelay = 0;
-bool stateLEDFlag = false;
-int stateLEDcount = 0;
-bool stateLEDchange = false;
-//====================================================
-// end state led definitions
-//====================================================
-
-
-//====================================================
-// estop
-//====================================================
-//#define ESTOP_PIN D6
-bool estopFlag = 0; // 0 is false
-volatile int estopDelay = 0;
-bool estop = 0;
-//====================================================
-// end estop definitions
-//====================================================
-
-
-
-
-
-//====================================================
-// encoder definitions
-//====================================================
-const uint8_t encoderPin3 = D14; // connected to driver 3
-
-const uint8_t encoderPin4 = D13; // connected to driver 4
-
-const uint8_t encoderPin2 = D12; // connected to driver 2
-
-const uint8_t encoderPin1 = D11; // connected to driver 1
-
-
-
-volatile int encoderDelay = 0;
-
-volatile int  encoderCount1 = 0;
-volatile int  encoderCount2 = 0;
-volatile int  encoderCount3 = 0;
-volatile int  encoderCount4 = 0;
-
-const int encoderRotation = 1120;
-double encoderTime = 0;
-double rotations = 0;
-//====================================================
-// end encoder definitions
-//====================================================
-
-//====================================================
-// encoder1 timer
-//====================================================
-void incrementEncoder1() { 
-  encoderCount1++;  
-}
-//====================================================
-// end encoder1 timer
-//====================================================
-
-//====================================================
-// encoder2 timer
-//====================================================
-void incrementEncoder2() { 
-  encoderCount2++;
-}
-//====================================================
-// end encoder2 timer
-//====================================================
-
-//====================================================
-// encoder1 timer
-//====================================================
-void incrementEncoder3() { 
-  encoderCount3++;  
-}
-//====================================================
-// end encoder1 timer
-//====================================================
-
-//====================================================
-// encoder2 timer
-//====================================================
-void incrementEncoder4() { 
-  encoderCount4++;
-}
-//====================================================
-// end encoder2 timer
-//====================================================
-
-
-
-
-
-//====================================================
-// json definitions
-//====================================================
-#include <ArduinoJson.h>
-// json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
-StaticJsonDocument<512> jsonPacket;
-// json message is a string that contains all the info smashed together
-String jsonMessage = "";
-//====================================================
-// end json definitions
-//====================================================
-
-
-//====================================================
-// states
-//====================================================
-enum LedStates {
-  LED_OFF,
-  LED_ON
-};
-LedStates RedLedState;
-LedStates BlueLedState;
-
-enum wsStates { 
-  WS_DISCONNECTED,
-  WS_CONNECTED
-};
-wsStates wsState;
-
-enum SpeedStates { 
-  SET_MODE,
-  AUTO_MODE
-};
-SpeedStates speedState;
 
 
 enum UltrasonicStates {
@@ -428,12 +89,24 @@ enum UltrasonicStates {
 };
 UltrasonicStates UltrasonicState;
 
+//====================================================
+// END ULTRASONIC SENSOR DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// BATTERY MONITOR DEFINITIONS
+//====================================================
+#define BATTERY_PIN A0
+double battery_value = 0;
+volatile int batteryDelay = 0;
 
-enum visionStates {
-  VISION_WAITING,
-  VISION_READING
-};
-visionStates visionState;
+double aveBatteryValue = 0;
+const int numBatterySamples = 20;
+double batterySamples[numBatterySamples] = {0};
+int batterySampleNumber = 0;
 
 enum BatteryStates {
   BAT_WAITING,
@@ -441,20 +114,72 @@ enum BatteryStates {
 };
 BatteryStates BatteryState;
 
+//====================================================
+// END BATTERY MONITOR DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// CLAMP DEFINITIONS
+//====================================================
+// #define CLAMP_PIN D5
+bool clamped = false;
+volatile int clampDelay = 0;
+
+
+
 enum ClampStates {
   CLAMP_DISENGAGED,
   CLAMP_ENGAGED
 };
 ClampStates ClampState;
 
-enum StepperStates {
-  OFF,
-  INIT,
-  RUN,
-  ERR
-};
-StepperStates StepperState;
+//====================================================
+// END CLAMP DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// ON BOARD LED DEFINITIONS
+//====================================================
+#define RED_LED     LEDR
+#define GREEN_LED   LEDG
+#define BLUE_LED    LEDB
+bool redLedFlag = false;
+bool blueLedFlag = false;
+volatile int redLedDelay = 0;
+volatile int blueLedDelay = 0;
 
+enum LedStates {
+  LED_OFF,
+  LED_ON
+};
+LedStates RedLedState;
+LedStates BlueLedState;
+
+void RedLedMachine(void);
+void BlueLedMachine(void);
+//====================================================
+// END ON BOARD LED DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// STATE LED DEFINITIONS
+//====================================================
+#define STATE_LED_RED PE_3      // gpio 4
+#define STATE_LED_YELLOW PG_3   // gpio 5
+#define STATE_LED_GREEN PG_10   // gpio 6
+volatile int stateLEDDelay = 0;
+bool stateLEDFlag = false;
+int stateLEDcount = 0;
+bool stateLEDchange = false;
 
 enum StateLEDStates {
   // ready for input, Unsafe / error, comms down, active process
@@ -467,6 +192,21 @@ StateLEDStates StateLEDState;
 StateLEDStates LastStateLEDState;
 
 
+//====================================================
+// END STATE LED DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// ESTOP DEFINITIONS
+//====================================================
+// #define ESTOP_PIN D6
+bool estopFlag = 0; // 0 is false
+volatile int estopDelay = 0;
+bool estop = 0;
+
 // this will be high, active if either estop button is pressed
 enum EstopStates {
   INACTIVE,          // this means we have no detected an estop signal 0
@@ -474,32 +214,46 @@ enum EstopStates {
 };
 EstopStates EstopState;
 
+//====================================================
+// END ESTOP DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// ENCODER DEFINITIONS
+//====================================================
+const uint8_t encoderPin3 = D14; // connected to driver 3
+const uint8_t encoderPin4 = D13; // connected to driver 4
+const uint8_t encoderPin2 = D12; // connected to driver 2
+const uint8_t encoderPin1 = D11; // connected to driver 1
 
-enum motorStates {
-  MOTOR_STOPPED,
-  MOTOR_RUNNING, 
-  MOTOR_CHANGING_DIRECTION,
-  MOTOR_ERROR,
-};
-motorStates motorState;
+volatile int encoderDelay = 0;
 
+volatile int  encoderCount1 = 0;
+volatile int  encoderCount2 = 0;
+volatile int  encoderCount3 = 0;
+volatile int  encoderCount4 = 0;
 
-
-//====================================================
-// end states
-//====================================================
-//====================================================
-// END INITIALIZATION AND VARIABLES
-//====================================================
-
-
+const int encoderRotation = 1120;
+double encoderTime = 0;
+double rotations = 0;
 
 //====================================================
-// TIMER AND FUNCTION PROTOTYPES
+// END ENCODER DEFINITIONS
 //====================================================
+//
+//
+//
+//
 //====================================================
-// M7 CORE TIMER
+// TIMER DEFINITIONS
 //====================================================
+bool testState = false;
+volatile int testDelay = 0;
+
+
 #include "Portenta_H7_TimerInterrupt.h"
 volatile int interruptCounter = 0;
 void m7timer() { 
@@ -532,8 +286,8 @@ void m7timer() {
     if (PIDDelay) PIDDelay--;
     if (batteryDelay) batteryDelay--;
     if (encoderDelay) encoderDelay--;
-    if (motorDelay) motorDelay--;
-    if (motorDirectionDelay) motorDirectionDelay--;
+    //if (motorDelay) motorDelay--;
+    //if (motorDirectionDelay) motorDirectionDelay--;
 
     
 
@@ -542,82 +296,35 @@ void m7timer() {
   // every 10,000/10,000 second - 1hz
   if ((interruptCounter % 10000) == 0) {
     if (blueLedDelay) blueLedDelay--;
-    if (visionDelay) visionDelay--;
+    //if (visionDelay) visionDelay--;
     interruptCounter = 0;
   }
 
 }
 Portenta_H7_Timer M7Timer(TIM7);
-//====================================================
-// END M7 CORE TIMER
-//====================================================
+
 
 //====================================================
-// function prototypes
+// END TIMER DEFINITIONS
+//====================================================
+//
+//
+//
+//
+//====================================================
+// BEGIN SETUP FUNCTION PROTOTYPES
 //====================================================
 void setup(void);
 void loop(void);
-void RedLedMachine(void);
-void BlueLedMachine(void);
-
-void UltrasonicMachine(void);
-double linearToRotational(double);
-double voltagetoDistance(double);
-
-void BatteryMachine(void);
-int voltageToPercent(int);
-//void ClampMachine(void);
-void StepperSpeedMachine(void);
-void WebSocketMachine(void);
-void onMessageCallback(WebsocketsMessage);
-void onEventsCallback(WebsocketsEvent, String);
-
-void visionMachine(void);
-
-void StepperMachine(void);
-void receiveJson(void);
-void sendJson(void);
-void CommandToEnumState(void);
-//long microsecondsToCentimeters(long);
-void StepperPID(void);
-void PID(void);
-void motorPID(struct MotorEncoder *m);
-void StateLEDMachine(void);
-void EstopMachine(void);
-void motorMachine(void);
-void motorSpeedMachine(void);
-void test(void);
-void encoderMachine(void);
-
-void incrementEncoder1(void);
-void incrementEncoder2(void);
-void incrementEncoder3(void);
-void incrementEncoder4(void);
-
-void changeDirection(void);
-void accelerateMotors(void);
-void decelerateMotors(void);
-void stopMotors(void);
-void spinMotors(double); // at the rate given by the tablet
-void setMotorsForward(void);
-void setMotorsBackward(void);
-void updateSpeed(void);
-
 //====================================================
-// end function prototypes
+// END SETUP FUNCTION PROTOTYPES
 //====================================================
+//
+//
+//
+//
 //====================================================
-// END TIMER AND FUNCTION PROTOTYPES
-//====================================================
-
-
-
-
-//====================================================
-// MAIN
-//====================================================
-//====================================================
-// setup
+// BEGIN SETUP
 //====================================================
 void setup() {
 
@@ -630,58 +337,57 @@ void setup() {
 
   // turn red led on for initialization setup
   digitalWrite(RED_LED, LOW);
-  delay(100);
   // extra stepper pin
 
   // state led setup
-  //pinMode(STATE_LED_RED, OUTPUT);
-  //pinMode(STATE_LED_YELLOW, OUTPUT);
-  //pinMode(STATE_LED_GREEN, OUTPUT);
-  //// turn on all big leds
-  //digitalWrite(STATE_LED_RED, HIGH);
-  //digitalWrite(STATE_LED_YELLOW, HIGH);
-  //digitalWrite(STATE_LED_GREEN, HIGH);
-//
-//
-  ////done with steppers, timers, serial configs
-  //digitalWrite(STATE_LED_RED, LOW);
+  pinMode(STATE_LED_RED, OUTPUT);
+  pinMode(STATE_LED_YELLOW, OUTPUT);
+  pinMode(STATE_LED_GREEN, OUTPUT);
+  // turn on all big leds
+  digitalWrite(STATE_LED_RED, HIGH);
+  digitalWrite(STATE_LED_YELLOW, HIGH);
+  digitalWrite(STATE_LED_GREEN, HIGH);
+
+
+  //done with steppers, timers, serial configs
+  digitalWrite(STATE_LED_RED, LOW);
 
   // wifi setup
-  //while (!Serial && millis() < 2000);
-  //
-  //WiFi.begin(ssid, password);
-//
-  //while (WiFi.status() != WL_CONNECTED){
-  //  delay(500);
-  //  WiFi.begin(ssid, password);
-  //  Serial.println("trying to connect");
-  //}
-//
-  //// wifi connected
+  while (!Serial && millis() < 2000);
+  
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED){
+    delay(500);
+    WiFi.begin(ssid, password);
+    Serial.println("trying to connect");
+  }
+
+  // wifi connected
   digitalWrite(RED_LED, HIGH);
 
-  //Serial.println("WiFi connected");
-  //Serial.println("IP address: ");
-  //Serial.println(WiFi.localIP());
-  //Serial.println("Mac address: ");
+  Serial.println("WiFi connected");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("Mac address: ");
   
 
   // done and connected with wifi config
-  //digitalWrite(STATE_LED_YELLOW, LOW);
-//
-//
-  //// websocket setup
-  //wsServer.listen(websockets_server_port);
-  //Serial.println("websocket server listening...");
-  //// end websocket setup
-//
-//
-  //// ultrasonic setup
-  //analogReadResolution(12);
-  //pinMode(ULTRASONIC_PIN, INPUT);
-//
-  ////battery monitor setup
-  //pinMode(BATTERY_PIN, INPUT);
+  digitalWrite(STATE_LED_YELLOW, LOW);
+
+
+  // websocket setup
+  wsServer.listen(websockets_server_port);
+  Serial.println("websocket server listening...");
+  // end websocket setup
+
+
+  // ultrasonic setup
+  analogReadResolution(12);
+  pinMode(ULTRASONIC_PIN, INPUT);
+
+  //battery monitor setup
+  pinMode(BATTERY_PIN, INPUT);
 
   // clamp setup
   //pinMode(CLAMP_PIN, INPUT);
@@ -689,80 +395,83 @@ void setup() {
   // estop detect setup
   //pinMode(ESTOP_PIN, INPUT);
   //pinMode(D5, OUTPUT);
-  //delay(1000);
+  delay(1000);
 
   // done with all setup
-  //digitalWrite(STATE_LED_GREEN, LOW);
-//
-//
-//
-  //// motor setup
-  //motorStepPin1.period_us(100);
-  //motorStepPin1.pulsewidth_us(0);
-//
-  //motorStepPin2.period_us(100);
-  //motorStepPin2.pulsewidth_us(0);
-//
-  //motorStepPin3.period_us(100);
-  //motorStepPin3.pulsewidth_us(0);
-  ////motorStepPin4.period_us(100000);
-//
-  //motorStepPin4.period_us(100);
-  //motorStepPin4.pulsewidth_us(0);
-//
-//
-  //pinMode(DirPin1, OUTPUT);
-  //pinMode(DirPin2, OUTPUT);
-  //pinMode(DirPin3, OUTPUT);
-  //pinMode(DirPin4, OUTPUT);
-//
-  //digitalWrite(DirPin1, direction);
-  //digitalWrite(DirPin2, direction);
-  //digitalWrite(DirPin3, direction);
-  //digitalWrite(DirPin4, direction);  
-  //
-  //StateLEDState = READY;
-//
-  //attachInterrupt(encoderPin1, incrementEncoder1, RISING);
-  //attachInterrupt(encoderPin2, incrementEncoder2, RISING);
-  //attachInterrupt(encoderPin3, incrementEncoder3, RISING);
-  //attachInterrupt(encoderPin4, incrementEncoder4, RISING);
-//
+  digitalWrite(STATE_LED_GREEN, LOW);
+
+
+
+  // motor setup
+  motorStepPin1.period_us(100);
+  motorStepPin1.pulsewidth_us(0);
+
+  motorStepPin2.period_us(100);
+  motorStepPin2.pulsewidth_us(0);
+
+  motorStepPin3.period_us(100);
+  motorStepPin3.pulsewidth_us(0);
+  //motorStepPin4.period_us(100000);
+
+  motorStepPin4.period_us(100);
+  motorStepPin4.pulsewidth_us(0);
+
+
+  pinMode(DirPin1, OUTPUT);
+  pinMode(DirPin2, OUTPUT);
+  pinMode(DirPin3, OUTPUT);
+  pinMode(DirPin4, OUTPUT);
+
+  digitalWrite(DirPin1, direction);
+  digitalWrite(DirPin2, direction);
+  digitalWrite(DirPin3, direction);
+  digitalWrite(DirPin4, direction);  
+  
+  StateLEDState = READY;
+
+  attachInterrupt(encoderPin1, incrementEncoder1, RISING);
+  attachInterrupt(encoderPin2, incrementEncoder2, RISING);
+  attachInterrupt(encoderPin3, incrementEncoder3, RISING);
+  attachInterrupt(encoderPin4, incrementEncoder4, RISING);
+
 }
 //====================================================
-// end setup
+// END SETUP
 //====================================================
-
+//
+//
+//
+//
 //====================================================
-// main loop
+// BEGIN LOOP
 //====================================================
 void loop() {
 
   BlueLedMachine();
   // RedLedMachine();
-  //WebSocketMachine();
-  //UltrasonicMachine();
-  //BatteryMachine();
-  ////ClampMachine();
-  //StateLEDMachine();
-  ////EstopMachine();
-  //motorMachine();
-  //PID();
-  //encoderMachine();
+  WebSocketMachine();
+  UltrasonicMachine();
+  BatteryMachine();
+  //ClampMachine();
+  StateLEDMachine();
+  //EstopMachine();
+  motorMachine();
+  PID();
+  encoderMachine();
   //test();
 }
 //====================================================
-// end loop
-//====================================================
-//====================================================
-// END MAIN
+// END LOOP
 //====================================================
 
 
 
 
+
+
+
 //====================================================
-// FUNCTIONS
+// BEGIN FUNCTIONS
 //====================================================
 //====================================================
 // debug test machine
@@ -793,28 +502,6 @@ void test() {
 // blue led machine
 //====================================================
 void BlueLedMachine() {
-  char data[BUFFER_SIZE] = {0}; 
-  Serial.readBytesUntil('\n', data, BUFFER_SIZE - 1);
-
-  StaticJsonDocument<200> doc;
-
-  // Populate the JSON document
-  doc["sensor"] = "gps";
-  doc["time"] = 1351824120;
-  doc["data"][0] = 48.756080;
-  doc["data"][1] = 2.302038;
-  
-  // Serialize the JSON document to a string
-  char output[256]; // Ensure this buffer is large enough for your JSON
-  serializeJson(doc, output);
-
-  // Use the JSON string as a const char*
-  Serial.write(output);
-  Serial.write('\n');
-
-  
-
-
   switch(BlueLedState) {
     case LED_OFF:
       if (!blueLedDelay) {
@@ -1131,91 +818,12 @@ void PID(void){
 
 
 
-//====================================================
-// motor pid machine
-//====================================================
-void motorPID(struct MotorEncoder *m){
-  // good values seem to be p=25 and i=10, d = 10
-  // better values seem to be p=10, I=15, d = 0
-  // better values seem to be p=25, i=15, d = 0
-
-  //Serial.print("Error In function ");
-  //Serial.println(m->initError);
-
-  m->initMeasurement = m->encoderSpeed;
-  // compute error // motor speed is the set point so constant // encoder speed is the measurement
-  m->initError = motorSpeed - m->initMeasurement;
-
-  // calculate the proportional term
-  M_p = M_Kp * m->initError;
-
-  M_i = M_i + 0.5f * M_Ki * M_T * (m->initError + m->prevError);
-
-  M_i = constrain(M_i, -100.0, 100.0); // these limits are the duty cycle
-
-  M_d = -(2.0 * M_Kd * (m->initMeasurement-m->prevMeasurement) + (2.0 * M_tau - M_T) * M_d) / (2.0 * M_tau + M_T);
-
-  // sum control terms
-  M_u = constrain(M_p + M_i + M_d, 0.0, 100.0);
-
-  // store value for next iteration
-  m->prevError = m->initError;
-  m->prevMeasurement = m->initMeasurement;
-  m->dutyCycle = M_u; // set duty cycle
-}
-//====================================================
-// end motor pid machine
-//====================================================
 
 
 
 
 
-//====================================================
-// encoder machine
-//====================================================
-void encoderMachine() {
-  if (!encoderDelay){
-    
-    encoderDelay = 5; // 0.5 seconds
 
-      // fraction of a rotation in 0.01 of a second  
-      // the amount of rotation in that 0.01 of a second    
-      // leaky integrator, gain of 0.1
-      //M1.encoderSpeed += ( (double(encoderCount1) / double(encoderRotation)) / 0.5 - M1.encoderSpeed) * 0.75;
-      M1.encoderSpeed += ((double(encoderCount1)/double(encoderRotation)) / 0.5 - M1.encoderSpeed)*0.9;
-
-      // V = R*W
-      //wheelSpeed = wheelDiameter * 0.5 * speed;                  // converted to linear velocity V = D * 1/2 * omega
-      //M2.encoderSpeed = (double(encoderCount2)/double(encoderRotation)) / 0.5;
-      //M3.encoderSpeed = (double(encoderCount3)/double(encoderRotation)) / 0.5;
-      //M4.encoderSpeed = (double(encoderCount4)/double(encoderRotation)) / 0.5;
-
-      M2.encoderSpeed += ((double(encoderCount2)/double(encoderRotation)) / 0.5 - M2.encoderSpeed)*0.9;
-      M3.encoderSpeed += ((double(encoderCount3)/double(860)) / 0.5 - M3.encoderSpeed)*0.9;
-      M4.encoderSpeed += ((double(encoderCount4)/double(encoderRotation)) / 0.5 - M4.encoderSpeed)*0.9;
-
-      Serial.println("encoder counts");
-      Serial.println(encoderCount1);
-      Serial.println(encoderCount2);
-      Serial.println(encoderCount3);
-      Serial.println(encoderCount4);
-
-
-      encoderCount1 = 0;
-      encoderCount2 = 0;
-      encoderCount3 = 0;
-      encoderCount4 = 0;
-
-    }
-  else {
-    
-  }
-}
-
-//====================================================
-// end encoder machine
-//====================================================
 
 
 
@@ -1527,48 +1135,6 @@ void receiveJson(void) {
 
 
 
-//====================================================
-// ultrasonic machine
-//====================================================
-void visionMachine() {
-  switch(visionState){
-    case VISION_WAITING:
-      if (!visionDelay) {
-        visionState = VISION_READING;
-      }
-    break;
-    case VISION_READING:
-      if (!visionDelay) {
-        
-        trajectory = Serial.readString();
-
-        if (trajectory!=""){
-          digitalWrite(LED_BLUE, LOW);
-          digitalWrite(LED_RED, LOW);
-          digitalWrite(LED_GREEN, LOW);
-        }
-
-        else{
-          digitalWrite(LED_BLUE, HIGH);
-          digitalWrite(LED_RED,  HIGH);
-          digitalWrite(LED_GREEN,HIGH);
-        }
-
-        visionDelay = 1; // 0.25 seconds
-        visionState = VISION_WAITING;
-      }
-
-    break;
-    default:
-    break;
-  }
-
-}
-
-//====================================================
-// end ultrasonic machine
-//====================================================
-
 
 
 
@@ -1655,25 +1221,10 @@ void StateLEDMachine(void) {
 //====================================================
 // end state LED machine
 //===================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+//
+//
+//
+//
 //====================================================
 // END FUNCTIONS
 //====================================================
