@@ -31,10 +31,9 @@
 //====================================================
 #include <ArduinoJson.h>
 // json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
-StaticJsonDocument<512> jsonPacket;
+StaticJsonDocument<1024> jsonPacket;
 // json message is a string that contains all the info smashed together
-char jsonMessage [1024] = "";
-
+char outgoingJsonString [1024] = "";
 
 enum SerialMachineStates {
   STREAMING,
@@ -60,6 +59,9 @@ void serialStream(void);
 #include <Arduino_CAN.h>
 
 auto motorSpeed = 0.0; // m/s from the tablet
+
+float motorSpeed1, motorSpeed2, motorSpeed3, motorSpeed4;
+
 auto opMotorSpeed = 0.0;
 float erefs = 0.0;
 float opErefs = 0.0;
@@ -74,13 +76,31 @@ uint8_t OP_EREFS_HEXDATA[4];
 float ms_to_erefs(float ms, float wheelDiameter);
 void erefs_to_hexdata(float erefs, uint8_t hexdata[4]);
 
+int motorIndex = 0;
+
+volatile int motorMachineDelay;
 
 uint32_t const M1_EREFS_ID = 0x048020A8;
 uint32_t const M2_EREFS_ID = 0x048040A8;
 uint32_t const M3_EREFS_ID = 0x048060A8;
 uint32_t const M4_EREFS_ID = 0x048080A8;
 
+uint32_t const MOTOR_EREFS_IDS [4] = {M1_EREFS_ID, M2_EREFS_ID, M3_EREFS_ID, M4_EREFS_ID};
+float motorSpeeds[4] = {0.0, 0.0, 0.0, 0.0};
+
+
 //uint8_t const EREFS_HEXDATA[] = {0x00, 0x00, 0x00, 0x00};
+
+
+void motorMachine(void);
+
+enum MotorMachineStates {
+  WAITING_MOTORS,
+  WRITING_MOTORS,
+};
+
+MotorMachineStates motorMachineState;
+
 
 
 
@@ -198,6 +218,7 @@ void m7timer() {
   interruptCounter++;
 
   if(serialMachineDelay) serialMachineDelay--;
+  if(motorMachineDelay) motorMachineDelay--;
 
   if(testDelay) testDelay--;
   // every 10/10,000 second - 1,000hz - 0.001 second
@@ -367,62 +388,33 @@ void BlueLedMachine() {
 
 void serialStream(void){
 
-  char output[512];
-  String incomingMessage = Serial.readStringUntil('\n');
+  
+  String incomingJsonString = Serial.readStringUntil('\n');
 
-  deserializeJson(jsonPacket, incomingMessage);
-
-  if (jsonPacket["device"] == "?"){
-    jsonPacket["device"] = "h7";  
-    float motorSpeed = jsonPacket["motorSpeed"];
-    opMotorSpeed = -1.0 * motorSpeed;
-    
-    erefs = ms_to_erefs(motorSpeed, wheelDiameter);
-    opErefs = ms_to_erefs(opMotorSpeed, wheelDiameter);
-
-    jsonPacket["calculatedErefs"] = erefs;
-//
-    erefs_to_hexdata(erefs, EREFS_HEXDATA); // write the value to the erefs hex var
-    erefs_to_hexdata(opErefs, OP_EREFS_HEXDATA);
-
-    CanMsg M1_SET_EREFS(CanExtendedId(M1_EREFS_ID), sizeof(EREFS_HEXDATA), EREFS_HEXDATA);
-    CanMsg M2_SET_EREFS(CanExtendedId(M2_EREFS_ID), sizeof(EREFS_HEXDATA), EREFS_HEXDATA);
-    CanMsg M3_SET_EREFS(CanExtendedId(M3_EREFS_ID), sizeof(OP_EREFS_HEXDATA), OP_EREFS_HEXDATA);
-    CanMsg M4_SET_EREFS(CanExtendedId(M3_EREFS_ID), sizeof(OP_EREFS_HEXDATA), OP_EREFS_HEXDATA);
-
-    jsonPacket["M1_SET_EREFS"] = M1_SET_EREFS;
-    
-    jsonPacket["M2_SET_EREFS"] = M2_SET_EREFS;
-    jsonPacket["M3_SET_EREFS"] = M3_SET_EREFS;
-    jsonPacket["M4_SET_EREFS"] = M4_SET_EREFS;
-
-    delay(10);
-    cr1 = CAN.write(M1_SET_EREFS);
-    delay(10);
-    cr2 = CAN.write(M2_SET_EREFS);
-    delay(10);
-    cr3 = CAN.write(M3_SET_EREFS);
-    delay(10);
-    cr4 = CAN.write(M4_SET_EREFS);
-    delay(10);
-    
-    //CanMsg new_msg = CAN.read();
-    //jsonPacket["new_msg"] = new_msg;
-    
-
-    jsonPacket["M4_CAN_RESULT"] = cr4; // driver 1 result
-    jsonPacket["M3_CAN_RESULT"] = cr3; // driver 1 result
-    jsonPacket["M2_CAN_RESULT"] = cr2; // driver 1 result
-    jsonPacket["M1_CAN_RESULT"] = cr1; // driver 1 result
+  deserializeJson(jsonPacket, incomingJsonString);
 
 
-    serializeJson(jsonPacket, output);
 
-    Serial.write(output);
-    Serial.write('\n');
+  if (jsonPacket["type"] == "get"){
+    // get messages
+    jsonPacket["device"] == "h7";
+  }
+
+  if (jsonPacket["type"] == "set"){
+    // set variables
+    motorSpeed1 = jsonPacket["motorSpeed1"];
+    motorSpeed2 = jsonPacket["motorSpeed2"];
+    motorSpeed3 = jsonPacket["motorSpeed3"];
+    motorSpeed4 = jsonPacket["motorSpeed4"];
+
   }
 
 
+  serializeJson(jsonPacket, outgoingJsonString);
+
+  Serial.write(outgoingJsonString);
+  Serial.write('\n');
+  
 
 }
 
@@ -478,6 +470,56 @@ float ms_to_erefs(float ms, float wheelDiameter) {
     //std::cout<<"EREFS: " << rpm * 18.7187185 << "\n";
     return rpm * 18.7187185; // this was pulled from the eletrocraft setup file
 }
+
+
+void motorMachine(void){
+
+  switch(motorMachineState) {
+
+    case WAITING_MOTORS:
+    if (!motorMachineDelay) {
+      motorMachineDelay = 10;
+      motorMachineState = WRITING_MOTORS;
+
+    }
+    break;
+
+    case WRITING_MOTORS:
+
+    if (!motorMachineDelay) {
+
+      motorMachineDelay = 5;
+      erefs = ms_to_erefs(motorSpeeds[motorIndex], wheelDiameter);
+      erefs_to_hexdata(erefs, EREFS_HEXDATA);
+
+      CanMsg MOTOR_SET_EREFS(CanExtendedId(MOTOR_EREFS_IDS[motorIndex]), sizeof(EREFS_HEXDATA), EREFS_HEXDATA);
+
+      CAN.write(MOTOR_SET_EREFS);
+
+      motorIndex++; // 0 , 1 , 2 , 3 
+
+      if (motorIndex == 4) {
+        motorIndex = 0;
+        motorMachineDelay = 10;
+        motorMachineState = WAITING_MOTORS;
+      }
+      
+
+    }
+
+
+
+    break;
+    default:
+    break;
+  }
+
+
+}
+
+
+
+
 
 //====================================================
 // END MOTOR MACHINE
