@@ -117,6 +117,17 @@ MotorMachineStates motorMachineState;
 // ULTRASONIC SENSOR DEFINITIONS
 //====================================================
 
+void ultrasonicMachine(void);
+
+enum UltrasonicMachineStates {
+  WAITING_ULTRASONIC,
+  WRITING_ULTRASONIC,
+};
+
+UltrasonicMachineStates UltrasonicMachineState;
+
+int ultrasonicDistance = 0;
+
 //====================================================
 // END ULTRASONIC SENSOR DEFINITIONS
 //====================================================
@@ -409,6 +420,7 @@ void serialStream(void){
       jsonPacket["erefsMotor1"] = erefValues[1];
       jsonPacket["erefsMotor2"] = erefValues[2];
       jsonPacket["erefsMotor3"] = erefValues[3];
+      jsonPacket["ultrasonic"] = ultrasonicDistance;
 
     }
 
