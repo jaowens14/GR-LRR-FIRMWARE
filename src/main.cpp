@@ -19,6 +19,8 @@
 #include <Arduino.h>
 #include <mbed.h>
 #include <math.h>
+#include <blueLedModule.cpp>
+
 //====================================================
 // END GENERAL LIBRARIES
 //====================================================
@@ -126,7 +128,12 @@ enum UltrasonicMachineStates {
 
 UltrasonicMachineStates UltrasonicMachineState;
 
-int ultrasonicDistance = 0;
+
+#define ULTRASONIC_PIN A2
+volatile int ultrasonicDelay = 0;
+float ultrasonicDistance = 0;
+const int numUltrasonicSamples = 50;
+double ultrasonicSamples[numUltrasonicSamples] = {0};
 
 //====================================================
 // END ULTRASONIC SENSOR DEFINITIONS
@@ -157,29 +164,7 @@ int ultrasonicDistance = 0;
 //
 //
 //
-//====================================================
-// ON BOARD LED DEFINITIONS
-//====================================================
-#define RED_LED     LEDR
-#define GREEN_LED   LEDG
-#define BLUE_LED    LEDB
-bool redLedFlag = false;
-bool blueLedFlag = false;
-volatile int redLedDelay = 0;
-volatile int blueLedDelay = 0;
 
-enum LedStates {
-  LED_OFF,
-  LED_ON
-};
-LedStates RedLedState;
-LedStates BlueLedState;
-
-void RedLedMachine(void);
-void BlueLedMachine(void);
-//====================================================
-// END ON BOARD LED DEFINITIONS
-//====================================================
 //
 //
 //
@@ -241,7 +226,7 @@ void m7timer() {
 
   // every 100/10,000 second - 100hz - 0.01 second
   if ((interruptCounter % 100) == 0) { 
-
+    if(ultrasonicDelay) ultrasonicDelay--;
   }
 
   // every 1,000/10,000 second - 10hz - 0.1 second
@@ -529,21 +514,52 @@ void motorMachine(void){
       
 
     }
+    break;
+    default:
+    break;
+  }
+
+}
 
 
+//====================================================
+// END MOTOR MACHINE
+//====================================================
+//
+//
+//
+//
+//====================================================
+// BEGIN ULTRASONIC MACHINE
+//====================================================
+void UltrasonicMachine() {
+  switch(UltrasonicMachineState){
+    case WAITING_ULTRASONIC:
+      if (!ultrasonicDelay) {
+        UltrasonicMachineState = WRITING_ULTRASONIC;
+
+      }
+    break;
+    case WRITING_ULTRASONIC:
+      if (!ultrasonicDelay) {
+        
+        // 1. float() to change analogRead() units
+        // 2. times 3.1 to scale to max ADC voltage for Portenta
+        // 3. divide by 4096 to convert from the ADC precision 
+        // 4. times 5.0 to scale to original battery voltage - this comes from the voltage divider on the board
+        // leaky integrator over rolling ave, gain of 0.1
+        ultrasonicDistance += ((float(analogRead(ULTRASONIC_PIN)) * 3.1 / 4096.0) * (5.0) - ultrasonicDistance) * 0.1;
+        ultrasonicDelay = 25; // 0.25 seconds
+        UltrasonicMachineState = WAITING_ULTRASONIC;
+      }
 
     break;
     default:
     break;
   }
 
-
 }
 
-
-
-
-
 //====================================================
-// END MOTOR MACHINE
+// END ULTRASONIC MACHINE
 //====================================================
