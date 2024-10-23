@@ -19,7 +19,11 @@
 #include <Arduino.h>
 #include <mbed.h>
 #include <math.h>
-#include <blueLedModule.cpp>
+#include <BlueLed.hpp>
+
+BlueLed blueLed;
+
+
 
 //====================================================
 // END GENERAL LIBRARIES
@@ -231,12 +235,12 @@ void m7timer() {
 
   // every 1,000/10,000 second - 10hz - 0.1 second
   if ((interruptCounter % 1000) == 0) { 
-    if (redLedDelay) redLedDelay--;
+    //if (redLedDelay) redLedDelay--;
   }
 
   // every 10,000/10,000 second - 1hz
   if ((interruptCounter % 10000) == 0) {
-    if (blueLedDelay) blueLedDelay--;
+    if (blueLed.delay) blueLed.delay--;
     interruptCounter = 0;
   }
 
@@ -308,7 +312,7 @@ void setup() {
 //====================================================
 void loop() {
 
-  BlueLedMachine();
+  blueLed.StateMachine();
 
   serialMachine();
   motorMachine();
@@ -352,33 +356,6 @@ void test() {
 
 
 
-//====================================================
-// BEGIN BLUE LED MACHINE
-//====================================================
-void BlueLedMachine() {
-  switch(BlueLedState) {
-    case LED_OFF:
-      if (!blueLedDelay) {
-        blueLedDelay = 1;
-        BlueLedState = LED_ON;
-        digitalWrite(BLUE_LED, LOW);
-
-      }
-    break;
-    case LED_ON:
-      if (!blueLedDelay) {
-        blueLedDelay = 1;
-        BlueLedState = LED_OFF;
-        digitalWrite(BLUE_LED, HIGH);
-      }
-    break;
-    default:
-    break;
-  }
-}
-//====================================================
-// END BLUE LED MACHINE
-//====================================================
 
 
 //====================================================
