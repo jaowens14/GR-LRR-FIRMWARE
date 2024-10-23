@@ -33,7 +33,7 @@
 // json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
 StaticJsonDocument<1024> jsonPacket;
 // json message is a string that contains all the info smashed together
-char outgoingJsonString [1024] = "";
+//char outgoingJsonString [1024] = "";
 
 enum SerialMachineStates {
   STREAMING,
@@ -72,6 +72,7 @@ int cr1, cr2, cr3, cr4;
 uint8_t EREFS_HEXDATA[4];  
 uint8_t OP_EREFS_HEXDATA[4];  
 
+float erefValues[4];
 
 float ms_to_erefs(float ms, float wheelDiameter);
 void erefs_to_hexdata(float erefs, uint8_t hexdata[4]);
@@ -84,10 +85,11 @@ uint32_t const M1_EREFS_ID = 0x048020A8;
 uint32_t const M2_EREFS_ID = 0x048040A8;
 uint32_t const M3_EREFS_ID = 0x048060A8;
 uint32_t const M4_EREFS_ID = 0x048080A8;
+uint32_t const MD_EREFS_ID = 0x049FE0A8; // default ID
 
 uint32_t const MOTOR_EREFS_IDS [4] = {M1_EREFS_ID, M2_EREFS_ID, M3_EREFS_ID, M4_EREFS_ID};
 float motorSpeeds[4] = {0.0, 0.0, 0.0, 0.0};
-
+int writeReceipts[4] = {0, 0, 0, 0};
 
 //uint8_t const EREFS_HEXDATA[] = {0x00, 0x00, 0x00, 0x00};
 
@@ -288,7 +290,7 @@ void setup() {
   {
     Serial.println("CAN.begin(...) failed.");
     for (;;) {
-      Serial.println("CAN ISSUE");
+      Serial.write("CAN ISSUE");
       delay(1000);
     }
   }
@@ -313,7 +315,8 @@ void loop() {
   BlueLedMachine();
 
   serialMachine();
-
+  motorMachine();
+  //serialStream();
 }
 //====================================================
 // END LOOP
@@ -388,33 +391,40 @@ void BlueLedMachine() {
 
 void serialStream(void){
 
+  if (Serial.available()){
+
+    char outgoingJsonString[512];
+    String incomingJsonString = Serial.readStringUntil('\n');
+
+    deserializeJson(jsonPacket, incomingJsonString);
+
+    if (jsonPacket["msgtyp"] == "get"){
+      // get messages
+      jsonPacket["device"] = "h7";
+      jsonPacket["wroteMotor0"] = writeReceipts[0];    
+      jsonPacket["wroteMotor1"] = writeReceipts[1];
+      jsonPacket["wroteMotor2"] = writeReceipts[2];
+      jsonPacket["wroteMotor3"] = writeReceipts[3];    
+      jsonPacket["erefsMotor0"] = erefValues[0];
+      jsonPacket["erefsMotor1"] = erefValues[1];
+      jsonPacket["erefsMotor2"] = erefValues[2];
+      jsonPacket["erefsMotor3"] = erefValues[3];
+
+    }
+
+    if(jsonPacket["msgtyp"] == "set"){
+      motorSpeeds[0] = jsonPacket["motorSpeed0"];
+      motorSpeeds[1] = jsonPacket["motorSpeed1"];
+      motorSpeeds[2] = jsonPacket["motorSpeed2"];
+      motorSpeeds[3] = jsonPacket["motorSpeed3"];
+    }
+
+
+    serializeJson(jsonPacket, outgoingJsonString);
+    Serial.write(outgoingJsonString);
+    Serial.write('\n');
   
-  String incomingJsonString = Serial.readStringUntil('\n');
-
-  deserializeJson(jsonPacket, incomingJsonString);
-
-
-
-  if (jsonPacket["type"] == "get"){
-    // get messages
-    jsonPacket["device"] == "h7";
   }
-
-  if (jsonPacket["type"] == "set"){
-    // set variables
-    motorSpeed1 = jsonPacket["motorSpeed1"];
-    motorSpeed2 = jsonPacket["motorSpeed2"];
-    motorSpeed3 = jsonPacket["motorSpeed3"];
-    motorSpeed4 = jsonPacket["motorSpeed4"];
-
-  }
-
-
-  serializeJson(jsonPacket, outgoingJsonString);
-
-  Serial.write(outgoingJsonString);
-  Serial.write('\n');
-  
 
 }
 
@@ -424,14 +434,14 @@ void serialMachine() {
       if (!serialMachineDelay) {
 
         serialStream();
-        serialMachineDelay = 10; // 1khz
+        serialMachineDelay = 1; // 1khz
         serialMachineState = WAITING;
 
       }
     break;
     case WAITING:
       if (!serialMachineDelay) {
-        serialMachineDelay = 10; // 1khz
+        serialMachineDelay = 1; // 1khz
         serialMachineState = STREAMING;
       }
     break;
@@ -487,14 +497,15 @@ void motorMachine(void){
     case WRITING_MOTORS:
 
     if (!motorMachineDelay) {
+      motorMachineDelay = 10;
 
-      motorMachineDelay = 5;
-      erefs = ms_to_erefs(motorSpeeds[motorIndex], wheelDiameter);
-      erefs_to_hexdata(erefs, EREFS_HEXDATA);
+      erefs = ms_to_erefs(motorSpeeds[motorIndex], wheelDiameter); // convert to erefs
 
-      CanMsg MOTOR_SET_EREFS(CanExtendedId(MOTOR_EREFS_IDS[motorIndex]), sizeof(EREFS_HEXDATA), EREFS_HEXDATA);
+      erefs_to_hexdata(erefs, EREFS_HEXDATA); // convert to hexdata
 
-      CAN.write(MOTOR_SET_EREFS);
+      CanMsg MOTOR_SET_EREFS(CanExtendedId(MOTOR_EREFS_IDS[motorIndex]), sizeof(EREFS_HEXDATA), EREFS_HEXDATA); // to can message
+
+      writeReceipts[motorIndex] = CAN.write(MOTOR_SET_EREFS);
 
       motorIndex++; // 0 , 1 , 2 , 3 
 
