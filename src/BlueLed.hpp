@@ -1,31 +1,31 @@
 
 #include <Arduino.h>
+
+#define RED_LED     LEDR
+#define GREEN_LED   LEDG
+#define BLUE_LED    LEDB
+
 class BlueLed {
   public:
 
-    #define RED_LED     LEDR
-    #define GREEN_LED   LEDG
-    #define BLUE_LED    LEDB
     bool redLedFlag = false;
     bool blueLedFlag = false;
     volatile int redLedDelay = 0;
     volatile int delay = 0;
 
-    enum LedStates {
+    enum States {
       OFF,
       ON
     };
-    LedStates State;
+    States state;
 
 
-    void StateMachine(void);
-
-    void StateMachine() {
-      switch(State) {
+    void StateMachine(void) {
+      switch(state) {
         case OFF:
           if (!delay) {
             delay = 1;
-            State = ON;
+            state = ON;
             digitalWrite(BLUE_LED, LOW);
 
           }
@@ -33,7 +33,7 @@ class BlueLed {
         case ON:
           if (!delay) {
             delay = 1;
-            State = OFF;
+            state = OFF;
             digitalWrite(BLUE_LED, HIGH);
           }
         break;
@@ -45,11 +45,3 @@ class BlueLed {
 
 
 };
-
-//====================================================
-// ON BOARD LED DEFINITIONS
-//====================================================
-
-//====================================================
-// END ON BOARD LED DEFINITIONS
-//====================================================

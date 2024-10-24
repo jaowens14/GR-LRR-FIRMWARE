@@ -23,6 +23,9 @@
 
 BlueLed blueLed;
 
+#include <Motors.hpp>
+
+Motors motors;
 
 
 //====================================================
@@ -58,64 +61,6 @@ void serialStream(void);
 //
 //
 //
-//====================================================
-// MOTOR DEFINITIONS
-//====================================================
-
-#include <Arduino_CAN.h>
-
-auto motorSpeed = 0.0; // m/s from the tablet
-
-float motorSpeed1, motorSpeed2, motorSpeed3, motorSpeed4;
-
-auto opMotorSpeed = 0.0;
-float erefs = 0.0;
-float opErefs = 0.0;
-float wheelDiameter = 0.048;
-int cr1, cr2, cr3, cr4;
-
-
-uint8_t EREFS_HEXDATA[4];  
-uint8_t OP_EREFS_HEXDATA[4];  
-
-float erefValues[4];
-
-float ms_to_erefs(float ms, float wheelDiameter);
-void erefs_to_hexdata(float erefs, uint8_t hexdata[4]);
-
-int motorIndex = 0;
-
-volatile int motorMachineDelay;
-
-uint32_t const M1_EREFS_ID = 0x048020A8;
-uint32_t const M2_EREFS_ID = 0x048040A8;
-uint32_t const M3_EREFS_ID = 0x048060A8;
-uint32_t const M4_EREFS_ID = 0x048080A8;
-uint32_t const MD_EREFS_ID = 0x049FE0A8; // default ID
-
-uint32_t const MOTOR_EREFS_IDS [4] = {M1_EREFS_ID, M2_EREFS_ID, M3_EREFS_ID, M4_EREFS_ID};
-float motorSpeeds[4] = {0.0, 0.0, 0.0, 0.0};
-int writeReceipts[4] = {0, 0, 0, 0};
-
-//uint8_t const EREFS_HEXDATA[] = {0x00, 0x00, 0x00, 0x00};
-
-
-void motorMachine(void);
-
-enum MotorMachineStates {
-  WAITING_MOTORS,
-  WRITING_MOTORS,
-};
-
-MotorMachineStates motorMachineState;
-
-
-
-
-
-//====================================================
-// END MOTOR DEFINITIONS
-//====================================================
 
 
 
@@ -220,7 +165,7 @@ void m7timer() {
   interruptCounter++;
 
   if(serialMachineDelay) serialMachineDelay--;
-  if(motorMachineDelay) motorMachineDelay--;
+  if(motors.delay) motors.delay--;
 
   if(testDelay) testDelay--;
   // every 10/10,000 second - 1,000hz - 0.001 second
@@ -315,7 +260,8 @@ void loop() {
   blueLed.StateMachine();
 
   serialMachine();
-  motorMachine();
+  motors.motorMachine();
+
   //serialStream();
 }
 //====================================================
@@ -374,23 +320,23 @@ void serialStream(void){
     if (jsonPacket["msgtyp"] == "get"){
       // get messages
       jsonPacket["device"] = "h7";
-      jsonPacket["wroteMotor0"] = writeReceipts[0];    
-      jsonPacket["wroteMotor1"] = writeReceipts[1];
-      jsonPacket["wroteMotor2"] = writeReceipts[2];
-      jsonPacket["wroteMotor3"] = writeReceipts[3];    
-      jsonPacket["erefsMotor0"] = erefValues[0];
-      jsonPacket["erefsMotor1"] = erefValues[1];
-      jsonPacket["erefsMotor2"] = erefValues[2];
-      jsonPacket["erefsMotor3"] = erefValues[3];
+      jsonPacket["wroteMotor0"] = motors.writeReceipts[0];    
+      jsonPacket["wroteMotor1"] = motors.writeReceipts[1];
+      jsonPacket["wroteMotor2"] = motors.writeReceipts[2];
+      jsonPacket["wroteMotor3"] = motors.writeReceipts[3];    
+      //jsonPacket["erefsMotor0"] = motors.erefValues[0];
+      //jsonPacket["erefsMotor1"] = motors.erefValues[1];
+      //jsonPacket["erefsMotor2"] = motors.erefValues[2];
+      //jsonPacket["erefsMotor3"] = motors.erefValues[3];
       jsonPacket["ultrasonic"] = ultrasonicDistance;
 
     }
 
     if(jsonPacket["msgtyp"] == "set"){
-      motorSpeeds[0] = jsonPacket["motorSpeed0"];
-      motorSpeeds[1] = jsonPacket["motorSpeed1"];
-      motorSpeeds[2] = jsonPacket["motorSpeed2"];
-      motorSpeeds[3] = jsonPacket["motorSpeed3"];
+      motors.motorSpeeds[0] = jsonPacket["motorSpeed0"];
+      motors.motorSpeeds[1] = jsonPacket["motorSpeed1"];
+      motors.motorSpeeds[2] = jsonPacket["motorSpeed2"];
+      motors.motorSpeeds[3] = jsonPacket["motorSpeed3"];
     }
 
 
@@ -429,83 +375,6 @@ void serialMachine() {
 
 
 
-
-
-//====================================================
-// BEGIN MOTOR MACHINE
-//====================================================
-
-void erefs_to_hexdata(float input_float, uint8_t hexdata[4]) {
-        uint32_t initialInt = int(round(input_float*16*16*16*16));
-        // Split the number into bytes
-        hexdata[3] = (initialInt >> 24) & 0xFF;  // Most significant byte
-        hexdata[2] = (initialInt >> 16) & 0xFF;
-        hexdata[1] = (initialInt >> 8) & 0xFF;
-        hexdata[0] = initialInt & 0xFF;          // Least significant byte
-}
-
-float ms_to_erefs(float ms, float wheelDiameter) {
-    // meters per second linear speed to erefs
-    // wheel diameter in meters 0.048
-
-    float angularVelocity = ms/wheelDiameter; // 0.1 m/s /m = 1/s
-    float rpm = angularVelocity/0.10471975057; // convert from rads/s to rpm
-
-    //std::cout<<"EREFS: " << rpm * 18.7187185 << "\n";
-    return rpm * 18.7187185; // this was pulled from the eletrocraft setup file
-}
-
-
-void motorMachine(void){
-
-  switch(motorMachineState) {
-
-    case WAITING_MOTORS:
-    if (!motorMachineDelay) {
-      motorMachineDelay = 10;
-      motorMachineState = WRITING_MOTORS;
-
-    }
-    break;
-
-    case WRITING_MOTORS:
-
-    if (!motorMachineDelay) {
-      motorMachineDelay = 10;
-
-      erefs = ms_to_erefs(motorSpeeds[motorIndex], wheelDiameter); // convert to erefs
-
-      erefs_to_hexdata(erefs, EREFS_HEXDATA); // convert to hexdata
-
-      CanMsg MOTOR_SET_EREFS(CanExtendedId(MOTOR_EREFS_IDS[motorIndex]), sizeof(EREFS_HEXDATA), EREFS_HEXDATA); // to can message
-
-      writeReceipts[motorIndex] = CAN.write(MOTOR_SET_EREFS);
-
-      motorIndex++; // 0 , 1 , 2 , 3 
-
-      if (motorIndex == 4) {
-        motorIndex = 0;
-        motorMachineDelay = 10;
-        motorMachineState = WAITING_MOTORS;
-      }
-      
-
-    }
-    break;
-    default:
-    break;
-  }
-
-}
-
-
-//====================================================
-// END MOTOR MACHINE
-//====================================================
-//
-//
-//
-//
 //====================================================
 // BEGIN ULTRASONIC MACHINE
 //====================================================
