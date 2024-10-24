@@ -1,7 +1,6 @@
 
 #include <Arduino.h>
 
-#define RED_LED     LEDR
 #define GREEN_LED   LEDG
 #define BLUE_LED    LEDB
 
@@ -20,7 +19,7 @@ class BlueLed {
     States state;
 
 
-    void StateMachine(void) {
+    void stateMachine(void) {
       switch(state) {
         case OFF:
           if (!delay) {

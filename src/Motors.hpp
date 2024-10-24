@@ -1,11 +1,11 @@
 
-
+#include <Arduino.h>
 #include <Arduino_CAN.h>
 
 class Motors{
     public:
 
-        volatile int delay;
+        volatile int motorDelay;
         int motorIndex = 0;
         float erefs = 0.0;
         const float wheelDiameter = 0.048;
@@ -30,6 +30,18 @@ class Motors{
 
         States state;
 
+        void setup(void){
+            // CAN SETUP
+            if (!CAN.begin(CanBitRate::BR_250k)) {
+              Serial.println("CAN.begin(...) failed.");
+              for (;;) {
+                Serial.write("CAN ISSUE");
+        
+                delay(1000);
+              }
+            }
+        }
+
 
         void erefs_to_hexdata(float input_float, uint8_t hexdata[4]) {
             uint32_t initialInt = int(round(input_float*16*16*16*16));
@@ -52,21 +64,23 @@ class Motors{
 
 
 
-        void motorMachine(void){
+
+
+        void stateMachine(void){
         
           switch(state) {
         
             case WAITING:
-            if (!delay) {
-              delay = 10;
+            if (!motorDelay) {
+              motorDelay = 10;
               state = WRITING;
             }
             break;
 
             case WRITING:
-            if (!delay) {
+            if (!motorDelay) {
 
-              delay = 10;
+              motorDelay = 10;
               erefs = ms_to_erefs(motorSpeeds[motorIndex], wheelDiameter); // convert to erefs
               erefs_to_hexdata(erefs, EREFS_HEXDATA); // convert to hexdata
               CanMsg MOTOR_SET_EREFS(CanExtendedId(MOTOR_EREFS_IDS[motorIndex]), sizeof(EREFS_HEXDATA), EREFS_HEXDATA); // to can message
@@ -75,7 +89,7 @@ class Motors{
 
               if (motorIndex == 4) {
                 motorIndex = 0;
-                delay = 10;
+                motorDelay = 10;
                 state = WAITING;
               }
             }
