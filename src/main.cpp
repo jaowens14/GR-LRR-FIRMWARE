@@ -11,19 +11,15 @@
 #include <mbed.h>
 #include <math.h>
 
-#include <BlueLed.hpp>
-BlueLed blueLed;
 
-#include <RedLed.hpp>
-RedLed redLed;
+//#include <BlueLed.hpp>
+//BlueLed blueLed;
 
 #include <Motors.hpp>
 Motors motors;
 
 #include <Ultrasonic.hpp>
 Ultrasonic ultrasonic;
-
-
 
 #include <MySerial.hpp>
 MySerial mySerial;
@@ -36,13 +32,18 @@ void m7timer() {
   // every 1/10,000 second - 10,000hz - 0.0001 second
   interruptCounter++;
 
-  if(mySerial.delay) mySerial.delay--;
+  //if(mySerial.delay) mySerial.delay--;
 
-  if(motors.motorDelay) motors.motorDelay--;
 
   // every 10/10,000 second - 1,000hz - 0.001 second
   if ((interruptCounter % 10) == 0) { 
      // this can indicate if something is taking way to long?
+
+      if(motors.thisDelay) motors.thisDelay--;
+      if(mySerial.thisDelay) mySerial.thisDelay--;
+      if(mySerial.timeout) mySerial.timeout--;
+
+
   }
 
   // every 100/10,000 second - 100hz - 0.01 second
@@ -57,7 +58,7 @@ void m7timer() {
 
   // every 10,000/10,000 second - 1hz
   if ((interruptCounter % 10000) == 0) {
-    if (blueLed.delay) blueLed.delay--;
+    //if (blueLed.delay) blueLed.delay--;
     interruptCounter = 0;
   }
 
@@ -70,18 +71,21 @@ void loop(void);
 
 
 void setup() {
-
+  delay(2000);
   M7Timer.attachInterruptInterval(100, m7timer);
   mySerial.setup();
-  redLed.setup();
   motors.setup();
+
+  ultrasonic.setup();
 
 }
 
 void loop() {
 
-  blueLed.stateMachine();
+  //blueLed.stateMachine();
+  
   mySerial.stateMachine();
   motors.stateMachine();
+  ultrasonic.stateMachine();
 
 }

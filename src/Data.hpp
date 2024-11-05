@@ -1,4 +1,0 @@
-class Data{
-    public:
-    static 
-};

@@ -1,87 +1,199 @@
 
+#ifndef MY_SERIAL_CLASS
+#define MY_SERIAL_CLASS
+
 #include <ArduinoJson.h>
-#include <Data.hpp>
 
-class MySerial {
-    public:
+#define RED_LED LEDR
 
-    // json packet allows us to use a 'dict' like structure in the form of "jsonPacket['prop'] = value"
-    StaticJsonDocument<1024> jsonPacket;
-    // json message is a string that contains all the info smashed together
+class MySerial
+{
+public:
+    StaticJsonDocument<64> jsonPacket;
+    boolean serialStarted = false;
+    boolean serialEnded = false;
+    static const byte numChars = 64;
+    char receivedChars[numChars];
+    boolean newData = false;
+    volatile int thisDelay = 0;
+    volatile int timeout = 0;
 
-    enum States {
-      STREAMING,
-      WAITING,
+    enum States
+    {
+        CONNECTED,
+        DISCONNECTED,
+        WAITING,
     };
+
     States state;
 
-    volatile int delay;
+    void stateMachine(void)
+    {
+        receiveLinux(); // will tell us if the serial has ended or not
 
-    void setup(void){
-        // debug setup
-        Serial.begin(115200);
-    }
+        switch (state)
+        {
 
+        case CONNECTED:
+            // while we are connected, if the timeout is zero, then we have lost connection
+            if (!thisDelay && !timeout)
+            {
+                thisDelay = 500;
 
-    void serialStream(void){
+                state = DISCONNECTED;
 
-      if (Serial.available()){
+                motors.STOP();
+            }
+            if (!thisDelay)
+            {
+                thisDelay = 500;
 
-        char outgoingJsonString[512];
-        String incomingJsonString = Serial.readStringUntil('\n');
+                Serial.println("connected");
+            }
+            break;
 
-        deserializeJson(jsonPacket, incomingJsonString);
+        case DISCONNECTED:
+            // while we are disconnected, look for messages
+            if (!thisDelay && timeout > 0)
+            {
+                thisDelay = 500;
 
-        if (jsonPacket["msgtyp"] == "get"){
-          // get messages
-          jsonPacket["device"] = "h7";
-          jsonPacket["wroteMotor0"] = motors.writeReceipts[0];    
-          jsonPacket["wroteMotor1"] = motors.writeReceipts[1];
-          jsonPacket["wroteMotor2"] = motors.writeReceipts[2];
-          jsonPacket["wroteMotor3"] = motors.writeReceipts[3];    
-          //jsonPacket["erefsMotor0"] = motors.erefValues[0];
-          //jsonPacket["erefsMotor1"] = motors.erefValues[1];
-          //jsonPacket["erefsMotor2"] = motors.erefValues[2];
-          //jsonPacket["erefsMotor3"] = motors.erefValues[3];
-          //jsonPacket["ultrasonic"] = ultrasonicDistance;
+                state = CONNECTED;
+            }
+            if (!thisDelay)
+            {
+                thisDelay = 500;
 
-        }
+                Serial.println("disconnected");
+            }
+            break;
 
-        if(jsonPacket["msgtyp"] == "set"){
-          motors.motorSpeeds[0] = jsonPacket["motorSpeed0"];
-          motors.motorSpeeds[1] = jsonPacket["motorSpeed1"];
-          motors.motorSpeeds[2] = jsonPacket["motorSpeed2"];
-          motors.motorSpeeds[3] = jsonPacket["motorSpeed3"];
-        }
-
-
-        serializeJson(jsonPacket, outgoingJsonString);
-        Serial.write(outgoingJsonString);
-        Serial.write('\n');
-    
-      }
-
-    }
-
-    void stateMachine() {
-      switch(state) {
-        case STREAMING:
-          if (!delay) {
-
-            serialStream();
-            delay = 1; // 1khz
-            state = WAITING;
-
-          }
-        break;
-        case WAITING:
-          if (!delay) {
-            delay = 1; // 1khz
-            state = STREAMING;
-          }
-        break;
         default:
-        break;
-      }
+            break;
+        }
+    }
+
+    void setup(void)
+    {
+        state = DISCONNECTED;
+        Serial.begin(115200);
+        Serial.println("Serial Starting");
+    }
+
+    void receiveLinux(void)
+    {
+
+        recvWithStartEndMarkers();
+
+        processMessage();
+    }
+
+    void recvWithStartEndMarkers(void)
+    {
+        digitalWrite(LED_BLUE, HIGH);
+
+        static boolean recvInProcess = false;
+        static byte ndx = 0;
+        char startMarker = '<';
+        char endMarker = '>';
+        char rc;
+
+        while (Serial.available() > 0 && newData == false)
+        {
+            rc = Serial.read();
+
+            if (recvInProcess == true)
+            {
+                if (rc != endMarker)
+                {
+                    receivedChars[ndx] = rc;
+                    ndx++;
+                    if (ndx >= numChars)
+                    {
+                        ndx = numChars - 1;
+                    }
+                }
+                else
+                {
+                    receivedChars[ndx] = '\0';
+                    recvInProcess = false;
+                    ndx = 0;
+                    newData = true;
+                }
+            }
+            else if (rc == startMarker)
+            {
+                recvInProcess = true;
+            }
+        }
+
+        digitalWrite(LED_BLUE, LOW);
+    }
+
+    void processMessage(void) // message has tags removed
+    {
+        if (newData == true)
+        {
+            depackage();
+            newData = false;
+            timeout = 2000;
+        }
+    }
+
+    void depackage(void)
+    {
+        DeserializationError err = deserializeJson(jsonPacket, receivedChars);
+
+        switch (err.code())
+        {
+        case DeserializationError::Ok:
+
+            updateParameters();
+            break;
+
+        case DeserializationError::InvalidInput:
+            Serial.print(F("Invalid input!"));
+            break;
+
+        case DeserializationError::NoMemory:
+            Serial.print(F("Not enough memory"));
+            break;
+
+        default:
+            Serial.print(F("Deserialization failed"));
+            break;
+        }
+    }
+
+    void updateParameters(void)
+    {
+        // Serial.println("updated speeds");
+        if (jsonPacket.containsKey("speed0"))
+        {
+            // Serial.print("updated speed 0");
+            motors.speeds[0] = jsonPacket["speed0"];
+        }
+
+        if (jsonPacket.containsKey("speed1"))
+        {
+            motors.speeds[1] = jsonPacket["speed1"];
+        }
+
+        if (jsonPacket.containsKey("speed2"))
+        {
+            motors.speeds[2] = jsonPacket["speed2"];
+        }
+
+        if (jsonPacket.containsKey("speed3"))
+        {
+            motors.speeds[3] = jsonPacket["speed3"];
+        }
+
+        // if (jsonPacket.containsKey("start_serial"))
+        //{
+        //     Serial.println("contained start serial");
+        //
+        //}
     }
 };
+#endif

@@ -1,16 +1,23 @@
+#ifndef MY_BLUE_LED_CLASS
+#define MY_BLUE_LED_CLASS
 
 #include <Arduino.h>
 
-#define GREEN_LED   LEDG
 #define BLUE_LED    LEDB
 
 class BlueLed {
   public:
-
-    bool redLedFlag = false;
-    bool blueLedFlag = false;
-    volatile int redLedDelay = 0;
+    volatile int cycleTime;
     volatile int delay = 0;
+    // default constructor, set cycle to 1
+    BlueLed(){
+      cycleTime = 1;
+    }
+
+    BlueLed(int ct){
+      cycleTime = ct;
+    }
+
 
     enum States {
       OFF,
@@ -23,7 +30,7 @@ class BlueLed {
       switch(state) {
         case OFF:
           if (!delay) {
-            delay = 1;
+            delay = cycleTime;
             state = ON;
             digitalWrite(BLUE_LED, LOW);
 
@@ -31,7 +38,7 @@ class BlueLed {
         break;
         case ON:
           if (!delay) {
-            delay = 1;
+            delay = cycleTime;
             state = OFF;
             digitalWrite(BLUE_LED, HIGH);
           }
@@ -40,7 +47,6 @@ class BlueLed {
         break;
       }
     }
-
-
-
 };
+
+#endif
