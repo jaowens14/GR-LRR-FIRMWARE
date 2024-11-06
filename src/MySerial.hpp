@@ -12,11 +12,13 @@ public:
     StaticJsonDocument<64> jsonPacket;
     boolean serialStarted = false;
     boolean serialEnded = false;
+    bool LED_STATE = false;
     static const byte numChars = 64;
     char receivedChars[numChars];
     boolean newData = false;
     volatile int thisDelay = 0;
     volatile int timeout = 0;
+    volatile int receiveDelay = 0;
 
     enum States
     {
@@ -82,6 +84,10 @@ public:
 
     void receiveLinux(void)
     {
+        if (!receiveDelay)
+        {
+            digitalWrite(RED_LED, HIGH);
+        }
 
         recvWithStartEndMarkers();
 
@@ -90,7 +96,6 @@ public:
 
     void recvWithStartEndMarkers(void)
     {
-        digitalWrite(LED_BLUE, HIGH);
 
         static boolean recvInProcess = false;
         static byte ndx = 0;
@@ -100,6 +105,7 @@ public:
 
         while (Serial.available() > 0 && newData == false)
         {
+
             rc = Serial.read();
 
             if (recvInProcess == true)
@@ -126,8 +132,6 @@ public:
                 recvInProcess = true;
             }
         }
-
-        digitalWrite(LED_BLUE, LOW);
     }
 
     void processMessage(void) // message has tags removed
@@ -137,11 +141,15 @@ public:
             depackage();
             newData = false;
             timeout = 2000;
+
+            digitalWrite(RED_LED, LED_STATE);
+            receiveDelay = 5;
         }
     }
 
     void depackage(void)
     {
+
         DeserializationError err = deserializeJson(jsonPacket, receivedChars);
 
         switch (err.code())

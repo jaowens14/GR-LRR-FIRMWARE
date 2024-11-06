@@ -34,6 +34,7 @@ void m7timer() {
 
   //if(mySerial.delay) mySerial.delay--;
 
+  if(mySerial.receiveDelay) mySerial.receiveDelay--;
 
   // every 10/10,000 second - 1,000hz - 0.001 second
   if ((interruptCounter % 10) == 0) { 
