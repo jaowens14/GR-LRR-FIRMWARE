@@ -19,7 +19,7 @@ void setup() {
         ;
     }
 
-    if (!CAN.begin(CAN_BAUD_250K)) {
+    if (!CAN.begin(CanBitRate::BR_250k)) {
         Serial.println("CAN initialization failed! Check wiring of CAN configureation");
         while(1) {
 
@@ -31,16 +31,13 @@ void setup() {
 
 void loop() {
     if (CAN.available()) {
-        CANMsg msg;
-
-        if (CAN.read(msg)) {
-            processCANEncoderMsg(msg);
-        }
+        CanMsg msg = CAN.read(); // Directly retrieve the message
+        processCANEncoderMsg(msg);
     }
 }    
 
-void processCANEncoderMsg(const CANMsg &msg) {
-    if (msg.len == 8){
+void processCANEncoderMsg(const CanMsg &msg) {
+    if (msg.data_length == 8){
         if (msg.id >= ENCODER_BASE_ID && msg.id < ENCODER_BASE_ID + 4) {
             int motor = msg.id - ENCODER_BASE_ID;
 
@@ -54,32 +51,32 @@ void processCANEncoderMsg(const CANMsg &msg) {
 
             Serial.print("Motor ");
             Serial.print(motor +1);
-            Serial.print("| Status: ")
+            Serial.print("| Status: ");
             Serial.print(status, HEX);
             Serial.print("| Encoder count: ");
             Serial.print(encoder_count);
             Serial.print("| Velocity: ");
             Serial.print(velocity);
-            Serial.print("| Diagnostics: ")
-            Serial.print(diagnostics, HEX):
+            Serial.print("| Diagnostics: ");
+            Serial.print(diagnostics, HEX);
 
             switch (motor) {
-                case 0;
+                case 0: 
                     encoder1_count = encoder_count;
                     encoder1_velocity = velocity;
                     break;
                 
-                case 1;
+                case 1:
                     encoder2_count = encoder_count;
                     encoder2_velocity = velocity;
                     break;
                     
-                case 2;
+                case 2:
                     encoder3_count = encoder_count;
                     encoder3_velocity = velocity;
                     break;
                     
-                case 3;
+                case 3:
                     encoder4_count = encoder_count;
                     encoder4_velocity = velocity;
                     break;
