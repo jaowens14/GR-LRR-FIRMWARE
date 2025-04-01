@@ -20,21 +20,21 @@ public:
 
     int thisDelay = 0;
 
-    const uint32_t ENCODER_BASE_ID = 0x580;
+    const uint32_t ENCODER_BASE_ID = 0x180;
 
-    void setup() {
-        Serial.begin(115200);
-        while (!Serial) {
-            ;
-        }
+    void setup(void) {
+        SerialUSB.println("Encoder setup started");
 
-        if (!CAN.begin(CanBitRate::BR_250k)) {
-            Serial.println("CAN initialization failed! Check wiring of CAN configureation");
-            while(1) {
+        // CAN SETUP
+        if (!CAN.begin(CanBitRate::BR_250k))
+        {
+            Serial.println("CAN.begin(...) failed.");
+            for (;;)
+            {
+                Serial.println("CAN ISSUE");
 
+                delay(1000);
             }
-        } else {
-            Serial.println("CAN initialized successfully!");
         }
     }
 
@@ -46,55 +46,68 @@ public:
     }    
 
     void processCANEncoderMsg(const CanMsg &msg) {
-        if (msg.data_length == 8){
-            if (msg.id >= ENCODER_BASE_ID && msg.id < ENCODER_BASE_ID + 4) {
-                int motor = msg.id - ENCODER_BASE_ID;
+        Serial.print("Received CAN msg ID: ");
+        Serial.print(msg.id, HEX);
+        Serial.print("Data Length: ");
+        Serial.print(msg.data_length);
 
-                uint8_t status = msg.data[0];
-
-                long encoder_count = ((long)msg.data[1] << 24) | ((long)msg.data[2] << 16) | ((long)msg.data[3] << 8) | msg.data[4];
-
-                int16_t velocity = ((int16_t)msg.data[5] << 8 | msg.data[6]);
-
-                uint8_t diagnostics = msg.data[7];
-
-                Serial.print("Motor ");
-                Serial.print(motor +1);
-                Serial.print("| Status: ");
-                Serial.print(status, HEX);
-                Serial.print("| Encoder count: ");
-                Serial.print(encoder_count);
-                Serial.print("| Velocity: ");
-                Serial.print(velocity);
-                Serial.print("| Diagnostics: ");
-                Serial.print(diagnostics, HEX);
-
-                switch (motor) {
-                    case 0: 
-                        encoder1_count = encoder_count;
-                        encoder1_velocity = velocity;
-                        break;
-                    
-                    case 1:
-                        encoder2_count = encoder_count;
-                        encoder2_velocity = velocity;
-                        break;
-                        
-                    case 2:
-                        encoder3_count = encoder_count;
-                        encoder3_velocity = velocity;
-                        break;
-                        
-                    case 3:
-                        encoder4_count = encoder_count;
-                        encoder4_velocity = velocity;
-                        break;
-                    default:
-                        break;    
-                }
-
+        if (msg.data_length > 0) {
+            Serial.print("Data ");
+            for (int i = 0; i < msg.data_length; i++) {
+                Serial.print(msg.data[i], HEX);
+                Serial.print(" ");
             }
         }
+
+        //if (msg.data_length == 8){
+            //if (msg.id >= ENCODER_BASE_ID && msg.id < ENCODER_BASE_ID + 4) {
+                //int motor = msg.id - ENCODER_BASE_ID;
+
+                //uint8_t status = msg.data[0];
+
+                //long encoder_count = ((long)msg.data[1] << 24) | ((long)msg.data[2] << 16) | ((long)msg.data[3] << 8) | msg.data[4];
+
+                //int16_t velocity = ((int16_t)msg.data[5] << 8 | msg.data[6]);
+
+                //uint8_t diagnostics = msg.data[7];
+
+                //Serial.print("Motor ");
+                //Serial.print(motor +1);
+                //Serial.print("| Status: ");
+                //Serial.print(status, HEX);
+                //Serial.print("| Encoder count: ");
+                //Serial.print(encoder_count);
+                //Serial.print("| Velocity: ");
+                //Serial.print(velocity);
+                //Serial.print("| Diagnostics: ");
+                //Serial.print(diagnostics, HEX);
+
+                //switch (motor) {
+                //    case 0: 
+                //        encoder1_count = encoder_count;
+                //        encoder1_velocity = velocity;
+                //        break;
+                //    
+                //    case 1:
+                //        encoder2_count = encoder_count;
+                //        encoder2_velocity = velocity;
+                //        break;
+                //        
+                //    case 2:
+                //        encoder3_count = encoder_count;
+                //        encoder3_velocity = velocity;
+                //        break;
+                //        
+                //    case 3:
+                //        encoder4_count = encoder_count;
+                //        encoder4_velocity = velocity;
+                //        break;
+                //    default:
+                //        break;    
+                //}
+
+            //}
+        //}
     }
 
     void stateMachine(void)
