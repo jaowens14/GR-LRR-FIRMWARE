@@ -2,126 +2,50 @@
 #define MY_ENCODER_CLASS
 
 #include <Arduino.h>
-#include <Arduino_CAN.h>
 
-class Encoder
+class Encoders
 {
 
 public:
-    volatile long encoder1_count = 0;
-    volatile long encoder2_count = 0;
-    volatile long encoder3_count = 0;
-    volatile long encoder4_count = 0;
+    volatile long position;
+    int encoderPinA;
+    int encoderPinB;
+    int encoderPinZ;
 
-    volatile long encoder1_velocity = 0;
-    volatile long encoder2_velocity = 0;
-    volatile long encoder3_velocity = 0;
-    volatile long encoder4_velocity = 0;
-
-    int thisDelay = 0;
-
-    const uint32_t ENCODER_BASE_ID = 0x180;
+    Encoders(int pinA, int pinB, int pinZ) {
+        encoderPinA = pinA;
+        encoderPinB = pinB;
+        encoderPinZ = pinZ;
+        position = 0;
+    }
 
     void setup(void) {
-        SerialUSB.println("Encoder setup started");
+        pinMode(encoderPinA, INPUT);
+        pinMode(encoderPinB, INPUT);
+        pinMode(encoderPinZ, INPUT);
+        attachInterrupt(digitalPinToInterrupt(encoderPinA), std::bind(&Encoders::updatePosition, this), CHANGE);
+        attachInterrupt(digitalPinToInterrupt(encoderPinB), std::bind(&Encoders::updatePosition, this), CHANGE);
+        attachInterrupt(digitalPinToInterrupt(encoderPinZ), std::bind(&Encoders::resetPosition, this), RISING);
+    }
 
-        // CAN SETUP
-        if (!CAN.begin(CanBitRate::BR_250k))
-        {
-            Serial.println("CAN.begin(...) failed.");
-            for (;;)
-            {
-                Serial.println("CAN ISSUE");
-
-                delay(1000);
-            }
+    void updatePosition() {
+        int stateA = digitalRead(encoderPinA);
+        int stateB = digitalRead(encoderPinB);
+        if (stateA == stateB) {
+            position++;
+        }
+        else {
+            position --;
         }
     }
 
-    void loop() {
-        if (CAN.available()) {
-            CanMsg msg = CAN.read(); // Directly retrieve the message
-            processCANEncoderMsg(msg);
-        }
-    }    
-
-    void processCANEncoderMsg(const CanMsg &msg) {
-        Serial.print("Received CAN msg ID: ");
-        Serial.print(msg.id, HEX);
-        Serial.print("Data Length: ");
-        Serial.print(msg.data_length);
-
-        if (msg.data_length > 0) {
-            Serial.print("Data ");
-            for (int i = 0; i < msg.data_length; i++) {
-                Serial.print(msg.data[i], HEX);
-                Serial.print(" ");
-            }
-        }
-
-        //if (msg.data_length == 8){
-            //if (msg.id >= ENCODER_BASE_ID && msg.id < ENCODER_BASE_ID + 4) {
-                //int motor = msg.id - ENCODER_BASE_ID;
-
-                //uint8_t status = msg.data[0];
-
-                //long encoder_count = ((long)msg.data[1] << 24) | ((long)msg.data[2] << 16) | ((long)msg.data[3] << 8) | msg.data[4];
-
-                //int16_t velocity = ((int16_t)msg.data[5] << 8 | msg.data[6]);
-
-                //uint8_t diagnostics = msg.data[7];
-
-                //Serial.print("Motor ");
-                //Serial.print(motor +1);
-                //Serial.print("| Status: ");
-                //Serial.print(status, HEX);
-                //Serial.print("| Encoder count: ");
-                //Serial.print(encoder_count);
-                //Serial.print("| Velocity: ");
-                //Serial.print(velocity);
-                //Serial.print("| Diagnostics: ");
-                //Serial.print(diagnostics, HEX);
-
-                //switch (motor) {
-                //    case 0: 
-                //        encoder1_count = encoder_count;
-                //        encoder1_velocity = velocity;
-                //        break;
-                //    
-                //    case 1:
-                //        encoder2_count = encoder_count;
-                //        encoder2_velocity = velocity;
-                //        break;
-                //        
-                //    case 2:
-                //        encoder3_count = encoder_count;
-                //        encoder3_velocity = velocity;
-                //        break;
-                //        
-                //    case 3:
-                //        encoder4_count = encoder_count;
-                //        encoder4_velocity = velocity;
-                //        break;
-                //    default:
-                //        break;    
-                //}
-
-            //}
-        //}
+    void resetPosition() {
+        position = 0;
     }
 
-    void stateMachine(void)
-    {
-        if (thisDelay > 0) {
-            return;
-        }
-
-        while (CAN.available()) {
-            CanMsg msg = CAN.read();
-            processCANEncoderMsg(msg);
-        }
+    long getPosition() {
+        return position;
     }
-    
 };
 
 #endif

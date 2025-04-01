@@ -24,8 +24,8 @@ Ultrasonic ultrasonic;
 #include <MySerial.hpp>
 MySerial mySerial;
 
-#include <Encoder.hpp>
-Encoder encoder; 
+//#include <Encoder.hpp>
+//Encoders encoder; 
 
 
 #include "Portenta_H7_TimerInterrupt.h"
@@ -45,7 +45,7 @@ void m7timer() {
       if(motors.thisDelay) motors.thisDelay--;
       if(mySerial.thisDelay) mySerial.thisDelay--;
       if(mySerial.timeout) mySerial.timeout--;
-      if(encoder.thisDelay) encoder.thisDelay--;
+      //if(encoder.thisDelay) encoder.thisDelay--;
 
   }
 
@@ -79,7 +79,7 @@ void setup() {
   mySerial.setup();
   motors.setup();
   ultrasonic.setup();
-  encoder.setup();
+  //encoder.setup();
 
 }
 
@@ -90,6 +90,6 @@ void loop() {
   mySerial.stateMachine();
   motors.stateMachine();
   ultrasonic.stateMachine();
-  encoder.stateMachine();
+  //encoder.stateMachine();
 
 }
