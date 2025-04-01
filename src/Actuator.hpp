@@ -14,8 +14,8 @@ class ActuatorControl {
     public:
         Adafruit_MCP4728 dac;
         Adafruit_ADS1115 adc;
-        float actuatorPositions[NUM_ACTUATORS] = {0,0}; // Desired positions (0-5V)
-        float feedbackSignals[NUM_ACTUATORS] = {0,0}; //Feedback (0-3.3V)
+        float actuatorPositions[NUM_ACTUATORS] = {0}; // Desired positions (0-5V)
+        float feedbackSignals[NUM_ACTUATORS] = {0}; //Feedback (0-3.3V)
         enum States { SET_POSITION, READ_FEEDBACK};
         States state;
 
