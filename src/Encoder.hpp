@@ -11,21 +11,31 @@ public:
     int encoderPinA;
     int encoderPinB;
     int encoderPinZ;
+    volatile int thisDelay;
+
+    enum States {
+        WAITING,
+        UPDATING,
+    };
+
+    States state;
 
     Encoders(int pinA, int pinB, int pinZ) {
         encoderPinA = pinA;
         encoderPinB = pinB;
         encoderPinZ = pinZ;
         position = 0;
+        thisDelay = 0;
+        state = WAITING;
     }
 
     void setup(void) {
         pinMode(encoderPinA, INPUT);
         pinMode(encoderPinB, INPUT);
         pinMode(encoderPinZ, INPUT);
-        attachInterrupt(digitalPinToInterrupt(encoderPinA), std::bind(&Encoders::updatePosition, this), CHANGE);
-        attachInterrupt(digitalPinToInterrupt(encoderPinB), std::bind(&Encoders::updatePosition, this), CHANGE);
-        attachInterrupt(digitalPinToInterrupt(encoderPinZ), std::bind(&Encoders::resetPosition, this), RISING);
+        attachInterrupt(digitalPinToInterrupt(encoderPinA), updatePosition, CHANGE);
+        attachInterrupt(digitalPinToInterrupt(encoderPinB), updatePosition, CHANGE);
+        attachInterrupt(digitalPinToInterrupt(encoderPinZ), resetPosition, RISING);
     }
 
     void updatePosition() {
@@ -46,6 +56,40 @@ public:
     long getPosition() {
         return position;
     }
+
+    void stateMachine(void) {
+        switch (state) {
+            case WAITING:
+                if (!thisDelay) {
+                    thisDelay = 10;
+                    state = UPDATING;
+                }
+                break;
+
+            case UPDATING:
+                if (!thisDelay) {
+                    thisDelay = 10;
+                    state = WAITING;
+                }
+                break;
+        default:
+            break;
+        }
+    }
+
+    static void updatePosition() {
+        if (encoderInstance != nullptr) {
+            encoderInstance->updatePosition();
+        }
+    }
+
+    static void resetPosition() {
+        if (encoderInstance != nullptr) {
+            encoderInstance->resetPosition();
+        }
+    }
+
+    static Encoders* encoderInstance; // Static reference to the encoder instance.
 };
 
 #endif

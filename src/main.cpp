@@ -5,6 +5,9 @@
  *  Project: GR-LRR
  *  Author: Jacob Owens - Vestas Blades America
  *  Date: 07/23/2024
+ * 
+ *  Author: Giovanni Cordova - CREADIS
+ *  Date: 03/24/2025
  */
 
 #include <Arduino.h>
@@ -24,8 +27,9 @@ Ultrasonic ultrasonic;
 #include <MySerial.hpp>
 MySerial mySerial;
 
-//#include <Encoder.hpp>
-//Encoders encoder; 
+#include <Encoder.hpp>
+Encoders* Encoders::encoderInstance = nullptr;
+Encoders encoder1(2,3,4);
 
 
 #include "Portenta_H7_TimerInterrupt.h"
@@ -79,17 +83,17 @@ void setup() {
   mySerial.setup();
   motors.setup();
   ultrasonic.setup();
-  //encoder.setup();
+  Encoders::encoderInstance = &encoder1;
+  encoder1.setup();
 
 }
 
 void loop() {
 
   //blueLed.stateMachine();
-  
   mySerial.stateMachine();
   motors.stateMachine();
   ultrasonic.stateMachine();
-  //encoder.stateMachine();
+  encoder1.stateMachine();
 
 }
