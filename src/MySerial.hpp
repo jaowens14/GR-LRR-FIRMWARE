@@ -50,7 +50,7 @@ public:
             {
                 thisDelay = 500;
 
-                Serial.println("connected");
+                //Serial.println("connected");
             }
             break;
 
@@ -66,7 +66,7 @@ public:
             {
                 thisDelay = 500;
 
-                Serial.println("disconnected");
+                //Serial.println("disconnected");
             }
             break;
 
@@ -192,10 +192,16 @@ public:
             motors.speeds[2] = jsonPacket["speed2"];
         }
 
-        if (jsonPacket.containsKey("speed3"))
+        if (jsonPacket.containsKey("speed3")   )
         {
             motors.speeds[3] = jsonPacket["speed3"];
         }
+
+//        if (jsonPacket.containsKey("read_encoder"))
+ //       {
+ //           encoder.readPositionData(); // Read encoder data
+ //           sendEncoderData();
+//        }
 
         // if (jsonPacket.containsKey("start_serial"))
         //{
@@ -203,5 +209,14 @@ public:
         //
         //}
     }
+
+ //   void sendEncoderData(void) {
+ //       for (int i = 0; i < 4; i++) {
+ //           StaticJsonDocument<64> encoderPacket;
+//            encoderPacket["motor"] = i;
+//            encoderPacket["encoder_value"] = encoder.receipts[i];
+//            serializeJson(encoderPacket, Serial);
+//        }
+//    }
 };
 #endif

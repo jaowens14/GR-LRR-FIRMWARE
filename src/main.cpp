@@ -24,13 +24,14 @@ Motors motors;
 #include <Ultrasonic.hpp>
 Ultrasonic ultrasonic;
 
+//#include <Encoder.hpp>
+//Encoders encoder;
+
 #include <MySerial.hpp>
 MySerial mySerial;
 
-#include <Encoder.hpp>
-Encoders* Encoders::encoderInstance = nullptr;
-Encoders encoder1(2,3,4);
-
+#include <Actuator.hpp>
+ActuatorControl actuator;
 
 #include "Portenta_H7_TimerInterrupt.h"
 volatile int interruptCounter = 0;
@@ -83,8 +84,15 @@ void setup() {
   mySerial.setup();
   motors.setup();
   ultrasonic.setup();
-  Encoders::encoderInstance = &encoder1;
-  encoder1.setup();
+  actuator.setup();
+  //encoder.setup();
+
+  // Pinout Test
+  //Serial.begin(9600); 
+  //for (int pin = 0; pin < 22; pin++) {
+  //  pinMode(pin, INPUT);
+  //}
+  //
 
 }
 
@@ -94,6 +102,15 @@ void loop() {
   mySerial.stateMachine();
   motors.stateMachine();
   ultrasonic.stateMachine();
-  encoder1.stateMachine();
+  actuator.stateMachine();
+  //encoder.stateMachine();
+
+  // Pinout Test
+  //for (int pin = 0; pin < 22; pin++) {
+  //  int state = digitalRead(pin);
+  //  Serial.print("Pin ");
+  //  Serial.print(pin); 
+  //}
+  //
 
 }
