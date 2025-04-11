@@ -73,6 +73,60 @@ void m7timer() {
 }
 Portenta_H7_Timer M7Timer(TIM7);
 
+// Serial command processor for actuator test
+void processSerialCommands() {
+    if (Serial.available ()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd.length() == 0) return;
+        Serial.print("Received command: ");
+        Serial.println(cmd);
+
+        if(cmd.equalsIgnoreCase("help")) {
+            Serial.println("Commands:");
+            Serial.println(" help         - Show this help message");
+            Serial.println(" state        - Print current actuator state");
+            Serial.println(" test         - Run self-test routine");
+            Serial.println(" set <n> <v>   - Set actuator n (0-indexed) to voltage v (0-5V)");
+        }
+        else if (cmd.equalsIgnoreCase("state")) {
+            actuator.debugOutput();
+        }
+        else if (cmd.equalsIgnoreCase("test")) {
+            actuator.runSelfTest();
+        }
+        else if (cmd.startsWith("set")) {
+            // Expected format: "set <actuator> <voltage>"
+            int firstSpace = cmd.indexOf(' ');
+            int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+            if (firstSpace == -1 || secondSpace == -1) {
+                Serial.println("Invalid set command. Fo rmat: set <actuator> <voltage>");
+            } else{
+                String actStr = cmd.substring(firstSpace + 1, secondSpace);
+                String voltStr = cmd.substring (secondSpace + 1);
+                int actuatorNum = actStr.toInt();
+                float voltage = voltStr.toFloat();
+                if (actuatorNum < 0 || actuatorNum >= NUM_ACTUATORS) {
+                    Serial.println("Invalid actuator number.");
+                } else if (voltage < 0.0 || voltage > MAX_VOLTAGE) {
+                    Serial.println("Voltage out of range (0-5V).");
+                } else {
+                    actuator.actuatorPositions[actuatorNum] = voltage;
+                    actuator.writeDAC(actuatorNum, voltage);
+                    Serial.print("Actuator ");
+                    Serial.print(actuatorNum);
+                    Serial.print(" manually set to ");
+                    Serial.print(voltage);
+                    Serial.print(" V.");
+                }
+            }
+        }
+        else {
+            Serial.println("Unknown command. Type 'help' for a list of commands.");
+        }
+
+    }
+}
 
 void setup(void);
 void loop(void);
@@ -97,7 +151,8 @@ void setup() {
 }
 
 void loop() {
-
+  processSerialCommands();
+  
   //blueLed.stateMachine();
   mySerial.stateMachine();
   motors.stateMachine();
