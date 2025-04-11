@@ -73,12 +73,11 @@ class ActuatorControl {
                 Serial.print(channel);
                 Serial.println(" value! **");
             } else {
-                Serial.print("DAC channel ");
-                Serial.print(channel);
-                Serial.print(" successfully set to ");
-                Serial.print(voltage);
-                Serial.print(" V");
-                delay(250);
+                //Serial.print("DAC channel ");
+                //Serial.print(channel);
+                //Serial.print(" successfully set to ");
+                //Serial.print(voltage);
+                //Serial.print(" V");
             }
         }
 
