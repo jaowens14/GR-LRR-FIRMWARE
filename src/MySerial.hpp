@@ -50,7 +50,7 @@ public:
             {
                 thisDelay = 500;
 
-                //Serial.println("connected");
+                Serial.println("connected");
             }
             break;
 
@@ -66,7 +66,7 @@ public:
             {
                 thisDelay = 500;
 
-                //Serial.println("disconnected");
+                Serial.println("disconnected");
             }
             break;
 
@@ -192,7 +192,7 @@ public:
             motors.speeds[2] = jsonPacket["speed2"];
         }
 
-        if (jsonPacket.containsKey("speed3")   )
+        if (jsonPacket.containsKey("speed3"))
         {
             motors.speeds[3] = jsonPacket["speed3"];
         }
@@ -219,4 +219,5 @@ public:
 //        }
 //    }
 };
+
 #endif

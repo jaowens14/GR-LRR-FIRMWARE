@@ -28,6 +28,7 @@ class Ultrasonic {
 
         void setup(void){
             analogReadResolution(10);
+            state = READING;
         }
 
 
