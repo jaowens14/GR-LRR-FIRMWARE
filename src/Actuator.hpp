@@ -6,7 +6,7 @@
 #include <Adafruit_MCP4728.h>
 #include <Adafruit_ADS1X15.h>
 
-#define NUM_ACTUATORS 2
+#define NUM_ACTUATORS 3
 #define MAX_VOLTAGE 5.0
 #define MAX_FEEDBACK 3.3
 
@@ -66,8 +66,8 @@ class ActuatorControl {
                     Serial.println(channel);
                     return; // Exit if an invalid channel is given
             }
-            
-            // Write the value to the specified DAC channel
+
+            // Write the value to the specified DAC channel in JSON
             if (!dac.setChannelValue(channelEnum, dacValue, MCP4728_VREF_VDD, MCP4728_GAIN_1X, MCP4728_PD_MODE_NORMAL)) {
                 Serial.println("** Error: Failed to set DAC channel value!");
                 Serial.print(channel);
@@ -78,7 +78,9 @@ class ActuatorControl {
                 //Serial.print(" successfully set to ");
                 //Serial.print(voltage);
                 //Serial.print(" V");
+                //delay(250);
             }
+
         }
 
         float readADC(uint8_t channel) {
@@ -88,6 +90,64 @@ class ActuatorControl {
             return voltage;
         }
 
+/*
+        void handleSerialCommand() {
+            if (Serial.available()) {
+                String input = Serial.readStringUntil('\n');
+                input.trim();
+
+                // Filter disconnected message
+                if (input.equals("disconnected")) {
+                    return;
+                }
+
+                // Filter heartbeat message
+                if (input.indexOf("hb") != -1) {
+                    return;
+                }
+
+                // Debug print to check recieved input
+                Serial.println("Recieved serial command: ");
+                Serial.println(input);
+
+
+                if (input.startsWith("{") && input.endsWith("}")) {
+                    StaticJsonDocument<200> doc;
+                    DeserializationError err = deserializeJson(doc, input);
+
+                    if (err) {
+                        Serial.print("JSON parsing error: ");
+                        Serial.println(err.f_str());
+                        return;
+                    }
+
+                    Serial.println("Parsed command successfully.");
+
+                    String action = doc["action"];
+                    int channel = doc["channel"];
+
+                    if (action == "set_voltage") {
+                        float voltage = doc["voltage"];
+                        writeDAC(channel, voltage);
+                        Serial.print("{\"status\":\"OK\", \"channel\":");
+                        Serial.print(channel);
+                        Serial.print(", \"voltage\":");
+                        Serial.print(voltage);
+                        Serial.println("}");
+                    }
+                    else if (action == "read_feedback") {
+                        float feedback = readADC(channel);
+                        Serial.print("{\"feedback\":");
+                        Serial.print(feedback);
+                        Serial.print(", \"channel\":");
+                        Serial.print(channel);
+                        Serial.println("}");
+                    }
+                }
+            }
+        }
+
+*/
         void stateMachine(){
             switch (state) {
                 case SET_POSITION:
@@ -146,7 +206,7 @@ class ActuatorControl {
                 Serial.print(testVoltage);
                 Serial.print(" V, Feedback: ");
                 Serial.print(feedback);
-                Serial.print(" V");
+                Serial.print(" V" );
 
                 // Reset actuator output before moving on
                 actuatorPositions[i]= 0.0;

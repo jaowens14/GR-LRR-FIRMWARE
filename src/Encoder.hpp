@@ -4,95 +4,137 @@
 #include <Arduino.h>
 #include <Arduino_CAN.h>
 
-class Encoders
-{
-
+class Encoder {
 public:
-    volatile int thisDelay;
-    int index = 0;
-    float erefs = 0.0;
-    const float wheelDiameter = 0.048;
-
-    uint8_t APOS_HEXDATA[4];
-
-    uint32_t const M1_APOS_ID = 0x048020A8;
-    uint32_t const M2_APOS_ID = 0x048040A8;
-    uint32_t const M3_APOS_ID = 0x048060A8;
-    uint32_t const M4_APOS_ID = 0x048080A8;
-    uint32_t const MD_APOS_ID = 0x049FE0A8; // default ID
-
-    uint32_t const MOTOR_APOS_IDS[4] = {M1_APOS_ID, M2_APOS_ID, M3_APOS_ID, M4_APOS_ID};
-    float speeds[4] = {0.0, 0.0, 0.0, 0.0};
-    int receipts[4] = {0, 0, 0, 0};
-
-    enum States
-    {
-        WAITING,
-        READING,
+    enum State {
+        IDLE,
+        REQUEST_SENT,
+        RESPONSE_RECIEVED,
+        TIMEOUT_ERROR
     };
 
-    States state;
+    Encoder(uint8_t node, uint16_t index, uint8_t subindex = 0)
+      : nodeId(node),
+        objIndex(index),
+        subIndex(subindex),
+        state(IDLE),
+        lastRequestTime(0),
+        timeoutInterval(1000)
+    {}
 
-    void setup(void)
-    {
-        // CAN SETUP
-        if (!CAN.begin(CanBitRate::BR_250k))
-        {
-            Serial.println("CAN.begin(...) failed.");
-            for (;;)
-            {
-                Serial.println("CAN ISSUE");
-
-                delay(1000);
-            }
-        }
-    }
-
-    void stateMachine(void)
-    {
-
-        switch (state)
-        {
-
-        case WAITING:
-            if (!thisDelay)
-            {
-                thisDelay = 10;
-                state = READING;
-            }
-            break;
-
-        case READING:
-            if (!thisDelay)
-            {
-
-                thisDelay = 10;
-                CanMsg MOTOR_GET_APOS(CanExtendedId(MOTOR_APOS_IDS[index]), sizeof(APOS_HEXDATA), APOS_HEXDATA); // to can message
-                //Serial.println(MOTOR_SET_APOS);
-                receipts[index] = CAN.write(MOTOR_GET_APOS);
-                index++; // 0 , 1 , 2 , 3
-
-                if (index == 4)
-                {
-                    index = 0;
-                    thisDelay = 10;
-                    state = WAITING;
+    void stateMachine() {
+        unsigned long currentTime = millis();
+        switch (state) {
+            case IDLE:
+                if ((currentTime - lastRequestTime) >= requestInterval) {
+                    if (requestEncoderData()) {
+                        state = REQUEST_SENT;
+                        lastRequestTime = currentTime;
+                    }
                 }
+                break;
+            case REQUEST_SENT:
+                if ((currentTime - lastRequestTime) >= timeoutInterval) {
+                    state = TIMEOUT_ERROR;
+                    Serial.print("SDO request timeout on node ");
+                    Serial.println(nodeId, DEC);
+                }
+                break;
+            case RESPONSE_RECIEVED:
+                Serial.print("Encoder [Node ]");
+                Serial.print(nodeId, DEC);
+                Serial.print("} Value: ");
+                Serial.print(encoderValue);
+                state = IDLE;
+                lastRequestTime = currentTime;
+                break;
+            case TIMEOUT_ERROR:
+                if ((currentTime - lastRequestTime) >= requestInterval) {
+                    state = IDLE;
+                }
+                break;
+            default:
+                break;
+
+        }
+    }
+
+    void dumpCanMsg(const CanMsg &msg) {
+        Serial.print("CAN Msg: ID=0x");
+        Serial.print(msg.id, HEX);
+        Serial.print("Length=");
+        Serial.print(msg.data_length);
+        Serial.print("Data=[");
+        for (int i = 0; i < msg.data_length; i++) {
+            Serial.print("0x");
+            Serial.print(msg.data[i], HEX);
+            if (i < msg.data_length - 1) {
+                Serial.print(", ");
             }
-            break;
+        }
+        Serial.print("]");
+    }
 
-        default:
-            break;
+    bool requestEncoderData() {
+        uint8_t sdoRequest[8] = {0};
+        sdoRequest[0] = 0x40;
+        sdoRequest[1] = objIndex & 0xFF;
+        sdoRequest[2] = (objIndex >> 8) & 0xFF;
+        sdoRequest[3] = subIndex;
+
+        uint32_t txId = 0x600 + nodeId;
+        CanMsg sdoMsg(CanExtendedId(txId), sizeof(sdoRequest), sdoRequest);
+        int ret = CAN.write(sdoMsg);
+        if (ret == 1) {
+            Serial.print("Sent SDO request (node )");
+            Serial.print(nodeId, DEC);
+            Serial.print(", index 0x");
+            Serial.print(objIndex, HEX);
+            Serial.print(")");
+            return true;
+        } else {
+            Serial.println("Error: SDO request not sent");
+            return false;
         }
     }
 
-    void readPositionData() {
-        for (int i = 0; i < 4; i++) {
-            CanMsg MOTOR_GET_APOS(CanExtendedId(MOTOR_APOS_IDS[i]), sizeof(APOS_HEXDATA), APOS_HEXDATA); // Request APOS data
-            receipts[i] = CAN.write(MOTOR_GET_APOS);
-            delay(10);
+    bool processCanMessage(const CanMsg &msg) {
+        uint32_t expectedId = 0x580 + nodeId;
+        if (msg.id == expectedId && msg.data_length >= 8) {
+            if (msg.data[0] == 0x43) {
+                encoderValue =
+                    ((int32_t)msg.data[4]) |
+                    (((int32_t)msg.data[4]) << 8) |
+                    (((int32_t)msg.data[4]) << 16) |
+                    (((int32_t)msg.data[4]) << 24);
+                state = RESPONSE_RECIEVED;
+                return true;
+            } else {
+                Serial.print("Unexpected SDO response from node ");
+                Serial.println(nodeId, DEC);
+            }
         }
+        return false;
     }
+
+    int32_t getEncoderValue() const {
+        return encoderValue;
+    }
+
+    State getState() const {
+        return state;
+    }
+
+private:
+    uint8_t nodeId;
+    uint16_t objIndex;
+    uint8_t subIndex;
+    int32_t encoderValue;
+
+    State state;
+    unsigned long lastRequestTime;
+    const unsigned long requestInterval = 200;
+    const unsigned long timeoutInterval;
 };
 
 #endif
