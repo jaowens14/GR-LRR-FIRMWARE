@@ -2,6 +2,7 @@
 #define ACTUATOR_CONTROL_H
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_MCP4728.h>
 #include <Adafruit_ADS1X15.h>
@@ -20,6 +21,9 @@ class ActuatorControl {
 
         enum States { SET_POSITION, READ_FEEDBACK};
         States state;
+
+        StaticJsonDocument<32> json;
+        char packet[32];
 
         void setup() {
             Wire.begin(); // Initialize I2C on specified pins
@@ -90,78 +94,19 @@ class ActuatorControl {
             return voltage;
         }
 
-/*
-        void handleSerialCommand() {
-            if (Serial.available()) {
-                String input = Serial.readStringUntil('\n');
-                input.trim();
 
-                // Filter disconnected message
-                if (input.equals("disconnected")) {
-                    return;
-                }
-
-                // Filter heartbeat message
-                if (input.indexOf("hb") != -1) {
-                    return;
-                }
-
-                // Debug print to check recieved input
-                Serial.println("Recieved serial command: ");
-                Serial.println(input);
-
-
-                if (input.startsWith("{") && input.endsWith("}")) {
-                    StaticJsonDocument<200> doc;
-                    DeserializationError err = deserializeJson(doc, input);
-
-                    if (err) {
-                        Serial.print("JSON parsing error: ");
-                        Serial.println(err.f_str());
-                        return;
-                    }
-
-                    Serial.println("Parsed command successfully.");
-
-                    String action = doc["action"];
-                    int channel = doc["channel"];
-
-                    if (action == "set_voltage") {
-                        float voltage = doc["voltage"];
-                        writeDAC(channel, voltage);
-                        Serial.print("{\"status\":\"OK\", \"channel\":");
-                        Serial.print(channel);
-                        Serial.print(", \"voltage\":");
-                        Serial.print(voltage);
-                        Serial.println("}");
-                    }
-                    else if (action == "read_feedback") {
-                        float feedback = readADC(channel);
-                        Serial.print("{\"feedback\":");
-                        Serial.print(feedback);
-                        Serial.print(", \"channel\":");
-                        Serial.print(channel);
-                        Serial.println("}");
-                    }
-                }
-            }
-        }
-
-*/
         void stateMachine(){
             switch (state) {
                 case SET_POSITION:
                     for (uint8_t i = 0; i < NUM_ACTUATORS; i++) {
-                        uint8_t dacChannel = i % 4; //Channel within MCP4728
-                        writeDAC(dacChannel, actuatorPositions[i]);
+                        writeDAC(i, actuatorPositions[i]);
                     }
                     state = READ_FEEDBACK;
                     break;
 
                 case READ_FEEDBACK:
                     for (uint8_t i = 0; i < NUM_ACTUATORS; i++) {
-                        uint8_t adcChannel = i % 4; // Channel within ADS1115
-                        feedbackSignals[i] = readADC(adcChannel);
+                        feedbackSignals[i] = readADC(i);
                     }
                     state = SET_POSITION; 
                     break;

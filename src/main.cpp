@@ -27,15 +27,14 @@ Ultrasonic ultrasonic;
 //#include <Encoder.hpp>
 //Encoder encoder(3, 0x6064);
 
-#include <Ext_Encoder.hpp>
-ExtEncoder encoder;
-
-#include <MySerial.hpp>
-MySerial mySerial;
+//#include <Ext_Encoder.hpp>
+//ExtEncoder encoder;
 
 #include <Actuator.hpp>
 ActuatorControl actuator;
 
+#include <MySerial.hpp>
+MySerial mySerial(actuator);
 
 #include "Portenta_H7_TimerInterrupt.h"
 volatile int interruptCounter = 0;
@@ -77,41 +76,46 @@ void m7timer() {
 }
 Portenta_H7_Timer M7Timer(TIM7);
 
-
 /*
  //Serial command processor for actuator test
 void processSerialCommands() {
-    if (Serial.available ()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        if (cmd.length() == 0) return;
+  //Use a static budder to persist data between calls.
+    static String commandBuffer = "";
 
-        //Ignore incoming heartbeat JSON messages
-        if (cmd.startsWith("<{") && cmd.endsWith("}>") && cmd.indexOf("\"hb\"") != -1) {
-          return;
-        }
+    //Process available characters in the serial input
+    while (Serial.available() > 0) {
+      char c = Serial.read();
+      commandBuffer += c;
+    }
 
-        //Ignore incoming speed JSON messages
-        if (cmd.startsWith("<{") && cmd.endsWith("}>") && cmd.indexOf("\"speed0\"") != -1) {
-          return;
+    // Process every complete command (delimited by '/n') into the buffer
+    int newlineIndex = commandBuffer.indexOf('\n');
+    while (newlineIndex != -1) {
+      //Extract one command (up to the newline) and trim whitespace.
+      String currentCommand = commandBuffer.substring(0,newlineIndex);
+      currentCommand.trim();
+
+      //Remove the processed command from the buffer
+      commandBuffer = commandBuffer.substring(newlineIndex + 1);
+
+      //Skip empty commands.
+      if (currentCommand.length() == 0) {
+        newlineIndex = commandBuffer.indexOf('\n');
+        continue;
+      }
+
+      //Ignore incoming heartbeat JSON messages
+      if (currentCommand.startsWith("<{") && currentCommand.endsWith("}>")) {
+        if (currentCommand.indexOf("\"hb\"") != -1 ) {
+          newlineIndex = commandBuffer.indexOf('\n');
+          continue;
         }
-        //Ignore incoming speed JSON messages
-        if (cmd.startsWith("<{") && cmd.endsWith("}>") && cmd.indexOf("\"speed1\"") != -1) {
-          return;
-        }
-        //Ignore incoming speed JSON messages
-        if (cmd.startsWith("<{") && cmd.endsWith("}>") && cmd.indexOf("\"speed2\"") != -1) {
-          return;
-        }
-        //Ignore incoming speed JSON messages
-        if (cmd.startsWith("<{") && cmd.endsWith("}>") && cmd.indexOf("\"speed3\"") != -1) {
-          return;
-        }
+      }
 
         Serial.print("Received command: ");
-        Serial.println(cmd);
+        Serial.println(currentCommand);
 
-        if(cmd.equalsIgnoreCase("help")) {
+        if(currentCommand.equalsIgnoreCase("help")) {
             Serial.println("Commands:");
             Serial.println(" help            - Show this help message");
             Serial.println(" state           - Print current actuator state");
@@ -120,28 +124,31 @@ void processSerialCommands() {
             Serial.println(" test            - Run self-test routine");
             Serial.println(" set <n> <v>     - Set actuator n (0-indexed) to voltage v (0-5V)");
         }
-        else if (cmd.equalsIgnoreCase("state")) {
+        else if (currentCommand.equalsIgnoreCase("state")) {
             actuator.debugOutput();
         }
-        else if (cmd.equalsIgnoreCase("test")) {
+        else if (currentCommand.equalsIgnoreCase("test")) {
             actuator.runSelfTest();
         }
-        else if (cmd.startsWith("set")) {
+        else if (currentCommand.startsWith("set")) {
              //Expected format: "set <actuator> <voltage>"
-            int firstSpace = cmd.indexOf(' ');
-            int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+            int firstSpace = currentCommand.indexOf(' ');
+            int secondSpace = currentCommand.indexOf(' ', firstSpace + 1);
             if (firstSpace == -1 || secondSpace == -1) {
                 Serial.println("Invalid set command. Format: set <actuator> <voltage>");
             } else{
-                String actStr = cmd.substring(firstSpace + 1, secondSpace);
-                String voltStr = cmd.substring (secondSpace + 1);
+                String actStr = currentCommand.substring(firstSpace + 1, secondSpace);
+                String voltStr = currentCommand.substring (secondSpace + 1);
                int actuatorNum = actStr.toInt();
                 float voltage = voltStr.toFloat();
+
                 if (actuatorNum < 0 || actuatorNum >= NUM_ACTUATORS) {
                     Serial.println("Invalid actuator number.");
-                } else if (voltage < 0.0 || voltage > MAX_VOLTAGE) {
+                }
+                else if (voltage < 0.0 || voltage > MAX_VOLTAGE) {
                     Serial.println("Voltage out of range (0-5V).");
-                } else {
+                }
+                else {
                     actuator.actuatorPositions[actuatorNum] = voltage;
                     actuator.writeDAC(actuatorNum, voltage);
                     Serial.print("Actuator ");
@@ -152,14 +159,14 @@ void processSerialCommands() {
                 }
             }
         }
-        else if (cmd.startsWith("sdo")) {
-          int firstSpace = cmd.indexOf(' ');
-          int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+        else if (currentCommand.startsWith("sdo")) {
+          int firstSpace = currentCommand.indexOf(' ');
+          int secondSpace = currentCommand.indexOf(' ', firstSpace + 1);
           if (firstSpace == -1 || secondSpace == -1) {
             Serial.println("Invalid sdo commannd. Format: sdo <node id> <index>");
           } else {
-            String nodeIdStr = cmd.substring(firstSpace + 1, secondSpace);
-            String indexStr = cmd.substring(secondSpace + 1);
+            String nodeIdStr = currentCommand.substring(firstSpace + 1, secondSpace);
+            String indexStr = currentCommand.substring(secondSpace + 1);
             
             uint8_t nodeId = nodeIdStr.toInt();
             uint16_t index = (uint16_t)strtol(indexStr.c_str(), NULL, 0);
@@ -175,6 +182,9 @@ void processSerialCommands() {
         else {
             Serial.println("Unknown command. Type 'help' for a list of commands.");
         }
+
+        //Move on to check the next command in the buffer.
+        newlineIndex = commandBuffer.indexOf('\n');
 
     }
 }

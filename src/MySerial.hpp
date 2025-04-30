@@ -3,6 +3,7 @@
 #define MY_SERIAL_CLASS
 
 #include <ArduinoJson.h>
+#include <Actuator.hpp>
 
 #define RED_LED LEDR
 
@@ -19,6 +20,9 @@ public:
     volatile int thisDelay = 0;
     volatile int timeout = 0;
     volatile int receiveDelay = 0;
+
+    ActuatorControl* actuator;
+    MySerial(ActuatorControl& actuatorRef) {actuator = &actuatorRef; }
 
     enum States
     {
@@ -175,33 +179,62 @@ public:
 
     void updateParameters(void)
     {
-        // Serial.println("updated speeds");
-        if (jsonPacket.containsKey("speed0"))
-        {
-            // Serial.print("updated speed 0");
-            motors.speeds[0] = jsonPacket["speed0"];
-        }
+        // Debug: Print recieved JSON
+        //Serial.print("Recieved JSON: ");
+        //serializeJson(jsonPacket, Serial);
+        //Serial.println();
 
-        if (jsonPacket.containsKey("speed1"))
-        {
-            motors.speeds[1] = jsonPacket["speed1"];
-        }
+        //Handle actuator commands first
+        if (jsonPacket.containsKey("action")) {
+            String action = jsonPacket["action"];
+            int channel = jsonPacket["channel"];
 
-        if (jsonPacket.containsKey("speed2"))
-        {
-            motors.speeds[2] = jsonPacket["speed2"];
-        }
+            if (action.equalsIgnoreCase("set_voltage")) {
+                float voltage = jsonPacket["voltage"];
+                actuator ->actuatorPositions[channel] = voltage;
+                actuator->writeDAC(channel,voltage);
 
-        if (jsonPacket.containsKey("speed3"))
-        {
-            motors.speeds[3] = jsonPacket["speed3"];
-        }
+                //Debug print to confirm voltage was sent
+                //Serial.print("Actuator ");
+                //Serial.print(channel);
+                //Serial.print(" Set to voltage: ");
+                //Serial.print(voltage);
 
-//        if (jsonPacket.containsKey("read_encoder"))
- //       {
- //           encoder.readPositionData(); // Read encoder data
- //           sendEncoderData();
-//        }
+                //Send confirmation response
+                StaticJsonDocument<128> response;
+                response["status"] = "OK";
+                response["channel"] = channel;
+                response["voltage"] = voltage;
+                serializeJson(response, Serial);
+                Serial.println();
+            }
+            else if (action.equalsIgnoreCase("read_feedback")) {
+                float feedback = actuator->readADC(channel);
+                actuator->feedbackSignals[channel] = feedback;
+                
+                //Debug print for actuator feedback
+                //Serial.print("Actuator ");
+                //Serial.print(channel);
+                //Serial.print(" feedback: ");
+                //Serial.print(feedback);
+
+                //Send feedback response
+                StaticJsonDocument<128> response;
+                response["feedback"] = feedback;
+                response["channel"] = channel;
+                serializeJson(response, Serial);
+                Serial.println();
+            }
+        }
+        
+
+        // Update motor speeds if present
+        for (int i = 0; i < 4; i++) {
+            String speedKey = "speed" + String(i);
+            if (jsonPacket.containsKey(speedKey)) {
+                motors.speeds[i] = jsonPacket[speedKey];
+            }
+        }
 
         // if (jsonPacket.containsKey("start_serial"))
         //{
