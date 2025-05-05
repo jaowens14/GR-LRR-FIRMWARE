@@ -13,8 +13,20 @@ class ExtEncoder {
         volatile int lastEncoded;
         volatile bool indexDetected;
 
+        enum EncoderState {
+            RUNNING,
+            INDEX_RESET
+        };
 
-        ExtEncoder(): position(0), lastEncoded(0), indexDetected(false) { }
+        EncoderState state;
+
+
+        ExtEncoder():
+            position(0),
+            lastEncoded(0),
+            indexDetected(false),
+            state(RUNNING)
+        { }
 
         void setup() {
 
@@ -23,7 +35,6 @@ class ExtEncoder {
             // pinMode(pinZ, INPUT);
 
             lastEncoded = readEncoderPins();
-
             _instance = this;
 
             attachInterrupt(digitalPinToInterrupt(pinA), isrA, CHANGE);
@@ -53,6 +64,7 @@ class ExtEncoder {
         void updateIdex() {
             position = 0;
             indexDetected = true;
+            state = INDEX_RESET;
         }
 
         long getPosition() {
@@ -75,7 +87,20 @@ class ExtEncoder {
         }
 
         void stateMachine() {
-            debugOutput();
+            switch (state) {
+                case RUNNING:
+                    //debugOutput();
+                    break;
+
+                case INDEX_RESET:
+                    indexDetected = false;
+                    state = RUNNING;
+                    break;
+
+                default:
+                    state = RUNNING;
+                    break;
+            }
         }
 
         void debugRawInputs() {
@@ -87,7 +112,6 @@ class ExtEncoder {
         }   
 
         static ExtEncoder* _instance;
-  // put your main code here, to run repeatedly:
 
         static void isrA() {
             if (_instance) _instance->updateEncoder();

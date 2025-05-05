@@ -103,6 +103,8 @@ void loop() {
   motors.stateMachine();
   ultrasonic.stateMachine();
   actuator.stateMachine();
-  encoder.stateMachine();  
+  encoder.stateMachine();
+  //Serial.print("Current Encoder Position BEFORE JSON: ");
+  //Serial.println(encoder.getPosition());  
   //encoder.debugRawInputs();
 }

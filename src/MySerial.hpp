@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 #include <Actuator.hpp>
+#include "Ext_Encoder.hpp"
 
 #define RED_LED LEDR
 
@@ -22,6 +23,8 @@ public:
     volatile int receiveDelay = 0;
 
     ActuatorControl* actuator;
+    ExtEncoder encoder;
+
     MySerial(ActuatorControl& actuatorRef) {actuator = &actuatorRef; }
 
     enum States
@@ -194,7 +197,7 @@ public:
                 actuator ->actuatorPositions[channel] = voltage;
                 actuator->writeDAC(channel,voltage);
 
-                //Debug print to confirm voltage was sent
+            //Debug print to confirm voltage was sent
                 //Serial.print("Actuator ");
                 //Serial.print(channel);
                 //Serial.print(" Set to voltage: ");
@@ -212,7 +215,7 @@ public:
                 float feedback = actuator->readADC(channel);
                 actuator->feedbackSignals[channel] = feedback;
                 
-                //Debug print for actuator feedback
+            //Debug print for actuator feedback
                 //Serial.print("Actuator ");
                 //Serial.print(channel);
                 //Serial.print(" feedback: ");
@@ -222,6 +225,23 @@ public:
                 StaticJsonDocument<128> response;
                 response["feedback"] = feedback;
                 response["channel"] = channel;
+                serializeJson(response, Serial);
+                Serial.println();
+            }
+            else if (action.equalsIgnoreCase("read_encoder")) {
+                //Send encoder position
+                StaticJsonDocument<128> response;
+                response["encoder_value"] = encoder.getPosition();
+                serializeJson(response, Serial);
+                Serial.println();
+                Serial.flush();
+            }
+            else if (action.equalsIgnoreCase("reset_encoder")) {
+                //Reset encoder position to 0.
+                encoder.position = 0;
+                
+                StaticJsonDocument<64> response;
+                response["status"] = "Encoder reset";
                 serializeJson(response, Serial);
                 Serial.println();
             }
@@ -235,22 +255,7 @@ public:
                 motors.speeds[i] = jsonPacket[speedKey];
             }
         }
-
-        // if (jsonPacket.containsKey("start_serial"))
-        //{
-        //     Serial.println("contained start serial");
-        //
-        //}
     }
-
- //   void sendEncoderData(void) {
- //       for (int i = 0; i < 4; i++) {
- //           StaticJsonDocument<64> encoderPacket;
-//            encoderPacket["motor"] = i;
-//            encoderPacket["encoder_value"] = encoder.receipts[i];
-//            serializeJson(encoderPacket, Serial);
-//        }
-//    }
 };
 
 #endif
