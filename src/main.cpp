@@ -42,6 +42,7 @@ void m7timer() {
   // every 1/10,000 second - 10,000hz - 0.0001 second
   interruptCounter++;
 
+  if(encoder.thisDelay) encoder.thisDelay--;
   //if(mySerial.delay) mySerial.delay--;
 
   if(mySerial.receiveDelay) mySerial.receiveDelay--;
@@ -53,13 +54,13 @@ void m7timer() {
       if(motors.thisDelay) motors.thisDelay--;
       if(mySerial.thisDelay) mySerial.thisDelay--;
       if(mySerial.timeout) mySerial.timeout--;
-      //if(encoder.thisDelay) encoder.thisDelay--;
 
   }
 
   // every 100/10,000 second - 100hz - 0.01 second
   if ((interruptCounter % 100) == 0) { 
     if(ultrasonic.delay) ultrasonic.delay--;
+    if(encoder.thisDelay) encoder.thisDelay--;
   }
 
   // every 1,000/10,000 second - 10hz - 0.1 second

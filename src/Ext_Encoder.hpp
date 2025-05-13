@@ -2,16 +2,23 @@
 #define EXTERNAL_ENCODER
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #define pinA A5
 #define pinB A6
+#define PULSES_PER_CM 37.6 //Calculated from encoder wheel circumference and encoder resolution.
+#define ENCODER_UPDATE_DELAY 1500 //Delay in milliseconds.
 
 class ExtEncoder {
     public: 
 
         volatile long position;
         volatile int lastEncoded;
+        volatile int thisDelay;
         volatile bool indexDetected;
+
+        StaticJsonDocument<64> json;
+        char packet[64];
 
         enum EncoderState {
             RUNNING,
@@ -25,6 +32,7 @@ class ExtEncoder {
             position(0),
             lastEncoded(0),
             indexDetected(false),
+            thisDelay(ENCODER_UPDATE_DELAY),
             state(RUNNING)
         { }
 
@@ -71,25 +79,22 @@ class ExtEncoder {
             noInterrupts();
             long pos = position;
             interrupts();
-            return pos;
+            return pos / PULSES_PER_CM; //Convert pulses to cm. 
         }
 
-        void debugOutput() {
-            Serial.print("Encoder Position: ");
-            Serial.print(getPosition());
-            //Serial.print(digitalRead(pinA));
-            delay(100);
-            if(indexDetected) {
-                Serial.print(" (Index pulse detected!)");
-                indexDetected = false;
-            }
-            Serial.println();
+        void writeDistanceJson() {
+            json["encoder_distance"] = getPosition();
+            serializeJson(json, packet);
+            Serial.println(packet);
         }
 
         void stateMachine() {
+            if (thisDelay == 0) {
+                writeDistanceJson();
+                thisDelay = ENCODER_UPDATE_DELAY;
+            }
             switch (state) {
                 case RUNNING:
-                    //debugOutput();
                     break;
 
                 case INDEX_RESET:
@@ -103,13 +108,30 @@ class ExtEncoder {
             }
         }
 
-        void debugRawInputs() {
+        /*
+        void debugOutput() {
+            Serial.print("Encoder Position: ");
+            Serial.print(getPosition());
+            Serial.print(" cm");
+            //Serial.print(digitalRead(pinA));
+            delay(100);
+            if(indexDetected) {
+                Serial.print(" (Index pulse detected!)");
+                indexDetected = false;
+            }
+            Serial.println();
+        }
+        */
+
+        /*
+        void debugInput() {
             Serial.print("Pin A: ");
             Serial.print(digitalRead(pinA));
             Serial.print(" Pin B: ");
             Serial.println(digitalRead(pinB));
             delay(200);
-        }   
+        }
+        */   
 
         static ExtEncoder* _instance;
 

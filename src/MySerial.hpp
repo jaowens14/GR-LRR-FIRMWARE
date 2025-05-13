@@ -228,14 +228,7 @@ public:
                 serializeJson(response, Serial);
                 Serial.println();
             }
-            else if (action.equalsIgnoreCase("read_encoder")) {
-                //Send encoder position
-                StaticJsonDocument<128> response;
-                response["encoder_value"] = encoder.getPosition();
-                serializeJson(response, Serial);
-                Serial.println();
-                Serial.flush();
-            }
+            
             else if (action.equalsIgnoreCase("reset_encoder")) {
                 //Reset encoder position to 0.
                 encoder.position = 0;
@@ -245,6 +238,7 @@ public:
                 serializeJson(response, Serial);
                 Serial.println();
             }
+            
         }
         
 
