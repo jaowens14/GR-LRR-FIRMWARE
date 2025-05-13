@@ -238,6 +238,10 @@ public:
                 serializeJson(response, Serial);
                 Serial.println();
             }
+
+            else if (action.equalsIgnoreCase("STOP")) {
+                motors.STOP();
+            }
             
         }
         

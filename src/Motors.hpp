@@ -75,7 +75,14 @@ public:
         
         for(int i = 0; i < 4; i++){
             speeds[i] = 0.0;
-        
+
+            // Immediately send motor stop command
+            float erefs = ms_to_erefs(0.0, wheelDiameter);
+            uint8_t hexdata[4];
+            erefs_to_hexdata(erefs, hexdata);
+
+            CanMsg MOTOR_STOP_CMD(CanExtendedId(MOTOR_EREFS_IDS[i]), sizeof(hexdata), hexdata);
+            CAN.write(MOTOR_STOP_CMD);
         }
     }
 
